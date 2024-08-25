@@ -21,31 +21,17 @@ def flow(
     
     dates = list_folders(main_folder)
     files = list_all_files(main_folder, dates)
-    files = filter_input_by_date(files, from_date, to_date)
+    files = filter_input_by_timeframe(files, from_date, to_date)
 
 
     stations_data = json_to_dataframe(files) 
     stations_master = pd.read_csv(stations_master_file)
-
-    # Validate model: options station, postcode, suburb, district, city
-    # Filter station_master by model and model_code
-    if model == 'station':
-        stations_master = stations_master[stations_master['short_name'] == model_code]
-    elif model == 'postcode':
-        stations_master = stations_master[stations_master['postcode'] == model_code]
-    elif model == 'suburb':
-        # add suburb to stations_master
-        stations_master = add_suburbs(stations_master)
-        
-    elif model == 'district':
-        # get district from geojson
-        stations_master = add_districts(stations_master)
-    elif model == 'city':
-        # No need to filter
-    else: return 'Invalid model'
-
+    stations = get_stations(model, model_code, stations_master)
+    
+    stations_data = stations_data[stations_data['station_id'].isin(stations)]
 
     stations_data_filtered = stations_data[['timestamp_file', 'station_id', 'num_bikes_available']].sort_values(by=['station_id','timestamp_file'])
+
     stations_data_filtered['diff'] = stations_data_filtered.groupby('station_id')['num_bikes_available'].diff().fillna(0)
     stations_data_filtered['in_bikes'] = stations_data_filtered['diff'].apply(lambda x: x if x > 0 else 0)
     stations_data_filtered['out_bikes'] = stations_data_filtered['diff'].apply(lambda x: -x if x < 0 else 0)
@@ -58,11 +44,16 @@ def flow(
     flow_agg['in_bikes'] = flow_agg['in_bikes'].rolling(window=aggregation_timeframe).mean()
     flow_agg['out_bikes'] = flow_agg['out_bikes'].rolling(window=aggregation_timeframe).mean()
     flow_agg.reset_index(inplace=True)  
-    
+
+    flow_agg.rename(columns={'timestamp_file': 'timestamp'}, inplace=True)
+
+    # Output in json format
+
     if output == 'inflow':
-        return flow_agg[['timestamp_file', 'in_bikes']]
+        return flow_agg[['timestamp', 'in_bikes']].to_json(orient='records')
     elif output == 'outflow':
-        return flow_agg[['timestamp_file', 'out_bikes']]
+        return flow_agg[['timestamp', 'out_bikes']].to_json(orient='records')
     else:
-        return flow_agg[['timestamp_file', 'in_bikes', 'out_bikes']]
+        return flow_agg[['timestamp', 'in_bikes', 'out_bikes']].to_json(orient='records')
+
 

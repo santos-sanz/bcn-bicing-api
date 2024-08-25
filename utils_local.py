@@ -35,7 +35,8 @@ def list_all_files(main_folder, dates):
     return files
 
 from datetime import datetime
-def filter_input_by_date(files:list, from_date:str, to_date:str):
+import pytz
+def filter_input_by_timeframe(files:list, from_date:str, to_date:str):
     """
     Filter a list of files by the specified date range.
     :param files: List of file paths.
@@ -43,12 +44,54 @@ def filter_input_by_date(files:list, from_date:str, to_date:str):
     :param to_date: End date in the format 'YYYY-MM-DD'.
     :return: List of file paths within the specified date range.
     """
-
+    timezone = pytz.timezone('Etc/GMT-2')
     files_w_ts = {file:int(file.split('/')[-1].split('.')[0]) for file in files}
-    from_date = int(datetime.timestamp(datetime.strptime(from_date, '%Y-%m-%d')))
-    to_date = int(datetime.timestamp(datetime.strptime(to_date, '%Y-%m-%d')))
+    from_date = int(datetime.timestamp(datetime.strptime(from_date, '%Y-%m-%d').replace(tzinfo=pytz.utc).astimezone(timezone)))
+    to_date = int(datetime.timestamp(datetime.strptime(to_date, '%Y-%m-%d').replace(tzinfo=pytz.utc).astimezone(timezone)))
     files_filtered = [file for file in files if from_date <= files_w_ts[file] <= to_date]
     return files_filtered
+
+def filter_input_by_timestamp(files:list, timestamp:str):
+    """
+    Filter a list of files by the specified timestamp.
+    :param files: List of file paths.
+    :param timestamp: Timestamp in the format 'YYYYMMDDHHmm'.
+    :return: List of file paths with the specified timestamp.
+    """
+    timestamp = int(datetime.timestamp(datetime.strptime(timestamp, '%Y%m%d%H%M')))
+    files_filtered = [file for file in files if timestamp == int(file.split('/')[-1].split('.')[0])]
+    return files_filtered
+
+def get_stations(model, model_code, stations_master):
+    """
+    Get the list of stations based on the specified model and model code.
+    Validate model. Options: station, postcode, suburb, district, city
+    :param model: Model type.
+    :param model_code: Model code.
+    :param stations_master: DataFrame containing the stations' information.
+    :return: List of stations.
+    """
+    stations = []
+    if model == 'station':
+        stations = [model_code]
+    elif model == 'postcode':
+        stations_master['post_code'] = stations_master['post_code'].astype(int).astype(str)
+        stations_master = stations_master[stations_master['post_code'] == model_code]
+    elif model == 'suburb':
+        stations_master = add_suburbs(stations_master)
+        stations_master = stations_master[stations_master['suburb_code'] == model_code]
+    elif model == 'district':
+        stations_master = add_districts(stations_master)
+        stations_master = stations_master[stations_master['district_code'] == model_code]
+    elif model == 'city':
+        # No need to filter
+        pass
+    else:
+        return 'Invalid model'
+
+    if len(stations) == 0:
+        stations = [str(int(station)) for station in stations_master['short_name'].tolist()]
+    return stations
 
 def json_to_dataframe(json_files):
     """
@@ -63,6 +106,7 @@ def json_to_dataframe(json_files):
         df_data = pd.json_normalize(data['data']['stations'])
         df_data['file'] = json_file
         df_data['timestamp_file'] = os.path.basename(json_file).split('.')[0]
+
         dataframes.append(df_data)
     return pd.concat(dataframes)
 
@@ -84,7 +128,7 @@ def get_dis_surb(lat, lon, geojson):
     # Check the district that contains the point
     for index, row in gdf.iterrows():
         if row['geometry'].contains(point):
-            return {row['NOM'], row['CODI_UA']}
+            return (row['NOM'], row['CODI_UA'])
 
     return None
 
