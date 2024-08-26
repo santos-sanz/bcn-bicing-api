@@ -3,15 +3,11 @@ from utils_local import *
 def station_status(
         station_timestamp: str,
         model: str,
-        model_code: str,
-        output: str = 'both',    
-        aggregation_timeframe: str = '1h'
+        model_code: str
 ):
     
     # model types: station_level, postcode_level, suburb_level, district_level, city_level
     # model codes: station_id, postcode, suburb, district, city
-
-    df = pd.DataFrame()
 
     # Load data: To change in cloud environment
     main_folder = 'analytics/snapshots'
@@ -27,6 +23,20 @@ def station_status(
 
     stations = get_stations(model, model_code, stations_master)
     stations_data = stations_data[stations_data['station_id'].isin(stations)]
+    stations_master['station_id'] = stations_master['station_id'].astype(int).astype(str)
+    stations_master = stations_master[stations_master['station_id'].isin(stations)]
 
-    # TODO: Output: lat (station_master), lon (station_master), status (station_data), num_bikes_available (station_data)
+    stations_master = stations_master[['station_id', 'lat', 'lon']]
+    stations_data = stations_data[['station_id', 'status', 'num_bikes_available']]
+
+    stations_data = pd.merge(stations_data, stations_master, on='station_id', how='inner')
+
+    return stations_data.to_json(orient='records')
+
+
+
+    
+
+
+
 

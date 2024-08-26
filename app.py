@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from flow import flow
+from station_status import station_status
 
 app = FastAPI()
 
@@ -22,6 +23,31 @@ app.add_middleware(
     allow_methods=["GET"],  # Allowed methods
     allow_headers=["*"],  # Allowed headers
 )
+
+
+# Station Status Request model
+class StationStatus(BaseModel):
+    station_timestamp: str
+    model: str
+    model_code: str
+
+@app.get("/status/")
+def get_status_data(
+    station_timestamp: str,
+    model: str,
+    model_code: str
+):
+    try:
+        response = station_status(
+            station_timestamp=station_timestamp,
+            model=model,
+            model_code=model_code
+        )
+        return response
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 
 # Flow Request model
 class FlowRequest(BaseModel):
@@ -53,6 +79,8 @@ def get_flow_data(
         return response
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
 
 @app.get("/")
 def read_root():

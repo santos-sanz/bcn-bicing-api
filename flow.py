@@ -13,8 +13,6 @@ def flow(
     # model types: station_level, postcode_level, suburb_level, district_level, city_level
     # model codes: station_id, postcode, suburb, district, city
 
-    df = pd.DataFrame()
-
     # Load data: To change in cloud environment
     main_folder = 'analytics/snapshots'
     stations_master_file = main_folder + '/stations_master.csv'
@@ -27,7 +25,7 @@ def flow(
     stations_data = json_to_dataframe(files) 
     stations_master = pd.read_csv(stations_master_file)
     stations = get_stations(model, model_code, stations_master)
-    
+
     stations_data = stations_data[stations_data['station_id'].isin(stations)]
 
     stations_data_filtered = stations_data[['timestamp_file', 'station_id', 'num_bikes_available']].sort_values(by=['station_id','timestamp_file'])
