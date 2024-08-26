@@ -27,7 +27,7 @@ def station_status(
     stations_master = stations_master[stations_master['station_id'].isin(stations)]
 
     stations_master = stations_master[['station_id', 'lat', 'lon']]
-    stations_data = stations_data[['station_id', 'status', 'num_bikes_available']]
+    stations_data = stations_data[['station_id', 'status', 'num_bikes_available', 'num_docks_available']]
 
     stations_data = pd.merge(stations_data, stations_master, on='station_id', how='inner')
 
