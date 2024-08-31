@@ -5,6 +5,7 @@ from typing import Optional
 
 from flow import flow
 from station_status import station_status
+from status_flow import status_flow
 
 app = FastAPI()
 
@@ -80,11 +81,38 @@ def get_flow_data(
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+# Status & Flow Request model
+class StatusFlowRequest(BaseModel):
+    station_timestamp: str
+    model: str
+    model_code: str
+    output: Optional[str] = 'both'
+    aggregation_timeframe: Optional[str] = '1h'
+
+@app.get("/status_flow/")
+def get_status_flow_data(
+    station_timestamp: str,
+    model: str,
+    model_code: str,
+    output: str = 'both',
+    aggregation_timeframe: str = '1h'
+):
+    try:
+        flow_response, station_status_response = status_flow(
+            station_timestamp=station_timestamp,
+            model=model,
+            model_code=model_code,
+            output=output,
+            aggregation_timeframe=aggregation_timeframe
+        )
+        return flow_response, station_status_response
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.get("/")
 def read_root():
-    return {"message": "Hello, World!"}
+    return {"message": "Welcome to the BCN Bicing API!"}
 
 
 

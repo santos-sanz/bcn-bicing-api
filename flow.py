@@ -9,6 +9,16 @@ def flow(
         output: str = 'both',    
         aggregation_timeframe: str = '1h'
 ):
+    """
+    This function returns the inflow, outflow or both of bikes for a given timeframe, model and model code.
+    :param from_date: str: start date
+    :param to_date: str: end date
+    :param model: str: model type
+    :param model_code: str: model code
+    :param output: str: inflow, outflow or both
+    :param aggregation_timeframe: str: aggregation timeframe
+    """
+    
     
     # model types: station_level, postcode_level, suburb_level, district_level, city_level
     # model codes: station_id, postcode, suburb, district, city

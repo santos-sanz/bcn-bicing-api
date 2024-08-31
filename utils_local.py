@@ -55,12 +55,23 @@ def filter_input_by_timestamp(files:list, timestamp:str):
     """
     Filter a list of files by the specified timestamp.
     :param files: List of file paths.
-    :param timestamp: Timestamp in the format 'YYYYMMDDHHmm'.
-    :return: List of file paths with the specified timestamp.
+    :param timestamp: Timestamp in the format 'YYYY-MM-DD'.
+    :return: List of file paths with the closest timestamp to the specified date.
     """
-    timestamp = int(datetime.timestamp(datetime.strptime(timestamp, '%Y%m%d%H%M')))
-    files_filtered = [file for file in files if timestamp == int(file.split('/')[-1].split('.')[0])]
-    return files_filtered
+    timezone = pytz.timezone('Etc/GMT-2')
+    target_time = int(datetime.timestamp(datetime.strptime(timestamp, '%Y-%m-%d').replace(tzinfo=pytz.utc).astimezone(timezone)))
+    min_diff = float('inf')
+    closest_file = None
+
+    for file in files:
+        file_timestamp = int(file.split('/')[-1].split('.')[0])
+        time_diff = abs((file_timestamp - target_time))
+
+        if time_diff < min_diff:
+            min_diff = time_diff
+            closest_file = file
+
+    return [closest_file]
 
 def get_stations(model, model_code, stations_master):
     """
@@ -119,13 +130,8 @@ def get_dis_surb(lat, lon, geojson):
     :return: Name of the district containing the coordinates.
     """
 
-    # Load the GeoJSON file
     gdf = gpd.read_file(geojson)
-
-    # Create a Point object from the coordinates
     point = Point(lon, lat)
-
-    # Check the district that contains the point
     for index, row in gdf.iterrows():
         if row['geometry'].contains(point):
             return (row['NOM'], row['CODI_UA'])

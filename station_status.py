@@ -5,6 +5,12 @@ def station_status(
         model: str,
         model_code: str
 ):
+    """
+    This function returns the number of stations, the sum of bikes available and the sum of docks available for a given timestamp, model and model code.
+    :param station_timestamp: str: timestamp of the station data
+    :param model: str: model type
+    :param model_code: str: model code
+    """
     
     # model types: station_level, postcode_level, suburb_level, district_level, city_level
     # model codes: station_id, postcode, suburb, district, city
@@ -30,8 +36,22 @@ def station_status(
     stations_data = stations_data[['station_id', 'status', 'num_bikes_available', 'num_docks_available']]
 
     stations_data = pd.merge(stations_data, stations_master, on='station_id', how='inner')
+    # Agregate the data number of stations, sum of bikes and docks
+    
+    unique_stations_count = int(stations_data['station_id'].nunique())
+    num_bikes_available_sum = int(stations_data['num_bikes_available'].sum())
+    num_docks_available_sum = int(stations_data['num_docks_available'].sum())
 
-    return stations_data.to_json(orient='records')
+    results = {
+    'stations': unique_stations_count,
+    'num_bikes_available': num_bikes_available_sum,
+    'num_docks_available': num_docks_available_sum
+    }
+
+    results_json = json.dumps(results, indent=0)
+
+
+    return results_json, stations_data.to_json(orient='records')
 
 
 
