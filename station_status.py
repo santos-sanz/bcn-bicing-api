@@ -32,7 +32,10 @@ def station_status(
     stations_master['station_id'] = stations_master['station_id'].astype(int).astype(str)
     stations_master = stations_master[stations_master['station_id'].isin(stations)]
 
-    stations_master = stations_master[['station_id', 'lat', 'lon']]
+    stations_master = stations_master[['station_id', 'name', 'post_code', 'lat', 'lon']]
+    stations_master = add_districts(stations_master)
+    stations_master = add_suburbs(stations_master)
+
     stations_data = stations_data[['station_id', 'status', 'num_bikes_available', 'num_docks_available']]
 
     stations_data = pd.merge(stations_data, stations_master, on='station_id', how='inner')
