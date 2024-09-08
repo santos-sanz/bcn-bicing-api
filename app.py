@@ -17,6 +17,8 @@ origins = [
     "http://localhost",
     "http://localhost:8080",
     "http://example.com",
+    "http://localhost:3000",
+    "https://bcn-bicing-dashboard.vercel.app/"
 ]
 
 
