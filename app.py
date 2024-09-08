@@ -8,6 +8,9 @@ from station_status import station_status
 from status_flow import status_flow
 
 app = FastAPI()
+# TODO: Add to station_status the average position(latitude and longitude) of the stations
+# TODO: Add a function to only retrieve the most recent station_status and flow
+# TODO: Match the API headers with frontend headers
 
 # Allowed origins
 origins = [
