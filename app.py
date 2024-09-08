@@ -11,6 +11,7 @@ app = FastAPI()
 # TODO: Add to station_status the average position(latitude and longitude) of the stations
 # TODO: Add a function to only retrieve the most recent station_status and flow
 # TODO: Match the API headers with frontend headers
+# TODO: Change flow header from timestamp to readable datetime
 
 # Allowed origins
 origins = [
