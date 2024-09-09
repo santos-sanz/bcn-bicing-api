@@ -1,4 +1,5 @@
 from utils_local import *
+import pytz
 
 
 def flow(
@@ -55,13 +56,15 @@ def flow(
 
     flow_agg.rename(columns={'timestamp_file': 'timestamp'}, inplace=True)
 
+    flow_agg['time'] = flow_agg['timestamp'].dt.strftime('%H:%M')
+
     # Output in json format
 
     if output == 'inflow':
-        return flow_agg[['timestamp', 'in_bikes']].to_json(orient='records')
+        return flow_agg[['time', 'in_bikes']].to_json(orient='records')
     elif output == 'outflow':
-        return flow_agg[['timestamp', 'out_bikes']].to_json(orient='records')
+        return flow_agg[['time', 'out_bikes']].to_json(orient='records')
     else:
-        return flow_agg[['timestamp', 'in_bikes', 'out_bikes']].to_json(orient='records')
+        return flow_agg[['time', 'in_bikes', 'out_bikes']].to_json(orient='records')
 
 
