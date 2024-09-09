@@ -73,6 +73,19 @@ def filter_input_by_timestamp(files:list, timestamp:str):
 
     return [closest_file]
 
+# Last timestamp function
+def last_timestamp(files):
+    """
+    Get the last timestamp from a list of files.
+    :param files: List of file paths.
+    :return: Last timestamp.
+    """
+    #Create a dictionary with the timestamp of each file
+    files_w_ts = {file:int(file.split('/')[-1].split('.')[0]) for file in files}
+    #Get the file with the maximum timestamp
+    last_file = max(files_w_ts, key=files_w_ts.get)
+    return last_file
+
 def get_stations(model, model_code, stations_master):
     """
     Get the list of stations based on the specified model and model code.
