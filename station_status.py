@@ -48,7 +48,9 @@ def station_status(
     results = {
     'stations': unique_stations_count,
     'num_bikes_available': num_bikes_available_sum,
-    'num_docks_available': num_docks_available_sum
+    'num_docks_available': num_docks_available_sum,
+    'avg_lat': stations_master['lat'].mean(),
+    'avg_lon': stations_master['lon'].mean()
     }
 
     results_json = json.dumps(results, indent=0)
