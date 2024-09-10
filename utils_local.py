@@ -80,11 +80,19 @@ def last_timestamp(files):
     :param files: List of file paths.
     :return: Last timestamp.
     """
-    #Create a dictionary with the timestamp of each file
-    files_w_ts = {file:int(file.split('/')[-1].split('.')[0]) for file in files}
-    #Get the file with the maximum timestamp
-    last_file = max(files_w_ts, key=files_w_ts.get)
-    return last_file
+
+    timestamp = max([int(file.split('/')[-1].split('.')[0]) for file in files])
+    return datetime.utcfromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+
+def get_last_timestamp():
+    """
+    Get the last timestamp from the snapshots folder.
+    :return: Last timestamp.
+    """
+    main_folder = 'analytics/snapshots'
+    dates = list_folders(main_folder)
+    files = list_all_files(main_folder, dates)
+    return last_timestamp(files)
 
 def get_stations(model, model_code, stations_master):
     """

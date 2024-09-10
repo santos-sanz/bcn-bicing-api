@@ -6,11 +6,9 @@ from typing import Optional
 from flow import flow
 from station_status import station_status
 from status_flow import status_flow
+from utils_local import *
 
 app = FastAPI()
-# TODO: Add a function to only retrieve the most recent station_status and flow
-# TODO: Match the API headers with frontend headers
-#   { "id": 5, "name": "Sagrada Família", "lat": 41.4036, "lng": 2.1744, "status": "yellow", "bikes": 10, "docks": 10, "zone": "Eixample" }
 
 # Allowed origins
 origins = [
@@ -29,6 +27,7 @@ app.add_middleware(
     allow_methods=["GET"],  # Allowed methods
     allow_headers=["*"],  # Allowed headers
 )
+
 
 
 # Station Status Request model
@@ -53,6 +52,21 @@ def get_status_data(
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+@app.get("/status_now/")
+def get_status_data_now(
+    model: str,
+    model_code: str
+):
+
+    try:
+        response = station_status(
+            station_timestamp= get_last_timestamp(),
+            model=model,
+            model_code=model_code
+        )
+        return response
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # Flow Request model
@@ -81,6 +95,24 @@ def get_flow_data(
             model_code=model_code,
             output=output,
             aggregation_timeframe=aggregation_timeframe
+        )
+        return response
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
+@app.get("/flow_now/")
+def get_flow_data_now(
+    model: str,
+    model_code: str
+):
+    try:
+        response = flow(
+            from_date= (datetime.datetime.strptime(get_last_timestamp(), '%Y-%m-%d %H:%M:%S') - datetime.timedelta(days=1)).strftime('%Y-%m-%d %H:%M:%S'),
+            to_date= get_last_timestamp(),
+            model=model,
+            model_code=model_code,
+            output='both',
+            aggregation_timeframe='1h'
         )
         return response
     except Exception as e:
