@@ -14,6 +14,8 @@ app = FastAPI()
 
 # TODO: Split the request in different functions
 
+# TODO: Add status FULL (when docks = 0) & EMPTY (when bikes = 0)
+
 # Allowed origins
 origins = [
     "http://localhost",
