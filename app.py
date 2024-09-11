@@ -11,7 +11,8 @@ from utils_local import *
 app = FastAPI()
 
 # TODO: Change post_code format to string (4802.0 -> '04802')
-# TODO: Change lon header to lng
+
+# TODO: Split the request in different functions
 
 # Allowed origins
 origins = [

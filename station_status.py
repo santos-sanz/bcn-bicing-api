@@ -45,12 +45,15 @@ def station_status(
     num_bikes_available_sum = int(stations_data['num_bikes_available'].sum())
     num_docks_available_sum = int(stations_data['num_docks_available'].sum())
 
+    # rename lon to lng
+    stations_data.rename(columns={'lon': 'lng'}, inplace=True)
+    
     results = {
     'stations': unique_stations_count,
     'num_bikes_available': num_bikes_available_sum,
     'num_docks_available': num_docks_available_sum,
-    'avg_lat': stations_master['lat'].mean(),
-    'avg_lon': stations_master['lon'].mean()
+    'lat': stations_master['lat'].mean(),
+    'lng': stations_master['lon'].mean()
     }
 
     results_json = json.dumps(results, indent=0)
