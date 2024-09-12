@@ -10,8 +10,6 @@ from utils_local import *
 
 app = FastAPI()
 
-# TODO: Split the request in different functions
-
 # Allowed origins
 origins = [
     "http://localhost",
