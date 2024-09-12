@@ -4,6 +4,6 @@ pydantic
 pandas
 geopandas
 pytz
-shapely.geometry 
+shapely
 os
 json
