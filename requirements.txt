@@ -2,3 +2,8 @@ fastapi
 uvicorn
 pydantic
 pandas
+geopandas
+pytz
+shapely.geometry 
+os
+json
