@@ -10,11 +10,7 @@ from utils_local import *
 
 app = FastAPI()
 
-# TODO: Change post_code format to string (4802.0 -> '04802')
-
 # TODO: Split the request in different functions
-
-# TODO: Add status FULL (when docks = 0) & EMPTY (when bikes = 0)
 
 # Allowed origins
 origins = [
@@ -124,6 +120,7 @@ def get_flow_data_now(
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+'''
 # Status & Flow Request model
 class StatusFlowRequest(BaseModel):
     station_timestamp: str
@@ -131,6 +128,7 @@ class StatusFlowRequest(BaseModel):
     model_code: str
     output: Optional[str] = 'both'
     aggregation_timeframe: Optional[str] = '1h'
+
 
 @app.get("/status_flow/")
 def get_status_flow_data(
@@ -151,7 +149,7 @@ def get_status_flow_data(
         return flow_response, station_status_response
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
-
+'''
 
 @app.get("/")
 def read_root():

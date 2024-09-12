@@ -39,27 +39,14 @@ def station_status(
     stations_data = stations_data[['station_id', 'status', 'num_bikes_available', 'num_docks_available']]
 
     stations_data = pd.merge(stations_data, stations_master, on='station_id', how='inner')
-    # Agregate the data number of stations, sum of bikes and docks
-    
-    unique_stations_count = int(stations_data['station_id'].nunique())
-    num_bikes_available_sum = int(stations_data['num_bikes_available'].sum())
-    num_docks_available_sum = int(stations_data['num_docks_available'].sum())
+    stations_data['post_code'] = stations_data['post_code'].astype(int).astype(str).apply(lambda x: x.zfill(5))
 
-    # rename lon to lng
     stations_data.rename(columns={'lon': 'lng'}, inplace=True)
     
-    results = {
-    'stations': unique_stations_count,
-    'num_bikes_available': num_bikes_available_sum,
-    'num_docks_available': num_docks_available_sum,
-    'lat': stations_master['lat'].mean(),
-    'lng': stations_master['lon'].mean()
-    }
+    stations_data['status'] = stations_data.apply(lambda row: 'FULL' if row['status'] == 'IN_SERVICE' and row['num_docks_available'] == 0 else row['status'], axis=1)
+    stations_data['status'] = stations_data.apply(lambda row: 'EMPTY' if row['status'] == 'IN_SERVICE' and row['num_bikes_available'] == 0 else row['status'], axis=1)
 
-    results_json = json.dumps(results, indent=0)
-
-
-    return results_json, stations_data.to_json(orient='records')
+    return  stations_data.to_json(orient='records')
 
 
 

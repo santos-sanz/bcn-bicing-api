@@ -2,6 +2,7 @@
 /analytics/
 /test.ipynb
 /test.json
+/output.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
