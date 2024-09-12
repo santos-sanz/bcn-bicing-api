@@ -5,5 +5,4 @@ pandas
 geopandas
 pytz
 shapely
-os
 json
