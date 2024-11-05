@@ -26,7 +26,6 @@ def flow(
 
     # Load data: To change in cloud environment
     main_folder = 'analytics/snapshots'
-    stations_master_file = main_folder + '/stations_master.csv'
     
     dates = list_folders(main_folder)
     files = list_all_files(main_folder, dates)
@@ -34,7 +33,7 @@ def flow(
 
 
     stations_data = json_to_dataframe(files) 
-    stations_master = pd.read_csv(stations_master_file)
+    stations_master = get_station_information()
     stations = get_stations(model, model_code, stations_master)
 
     stations_data = stations_data[stations_data['station_id'].isin(stations)]

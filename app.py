@@ -5,7 +5,6 @@ from typing import Optional
 
 from flow import flow
 from station_status import station_status
-from status_flow import status_flow
 from utils_local import *
 
 app = FastAPI()
@@ -14,7 +13,6 @@ app = FastAPI()
 origins = [
     "http://localhost",
     "http://localhost:8080",
-    "http://example.com",
     "http://localhost:3000",
     "https://bcn-bicing-dashboard.vercel.app/"
 ]
@@ -28,6 +26,16 @@ app.add_middleware(
     allow_headers=["*"],  # Allowed headers
 )
 
+
+
+@app.get("/timeframe/")
+def get_timeframe():
+
+    try:
+        response = get_timeframe()
+        return response
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # Station Status Request model

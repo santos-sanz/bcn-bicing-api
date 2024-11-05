@@ -3,6 +3,24 @@ import json
 import pandas as pd
 import geopandas as gpd
 from shapely.geometry import Point
+import requests
+
+def get_station_information():
+    """
+    Get the station information from the GBFS API and add the district and suburb codes and names.
+    """
+    url = 'https://barcelona-sp.publicbikesystem.net/customer/ube/gbfs/v1/en/station_information'
+    response = requests.get(url)
+    df = pd.DataFrame(response.json()['data']['stations'])
+    df['district'] = df['cross_street'].str.split('/').str[0]
+    df['suburb'] = df['cross_street'].str.split('/').str[1]
+    df = df[df['district'].notna()]
+    df['district_code'] = df['district'].str.split('-').str[0]
+    df['district_name'] = df['district'].str.split('-').str[1]
+    df = df[df['suburb'].notna()]
+    df['suburb_code'] = df['suburb'].str.split('-').str[0]
+    df['suburb_name'] = df['suburb'].str.split('-').str[1]
+    return df
 
 def list_folders(folder):
     """
@@ -89,40 +107,55 @@ def get_last_timestamp():
     Get the last timestamp from the snapshots folder.
     :return: Last timestamp.
     """
+    try:
+        main_folder = 'analytics/snapshots'
+        dates = list_folders(main_folder)
+        files = list_all_files(main_folder, dates)
+        return last_timestamp(files)
+    except Exception as e:
+        raise ValueError(f"Error getting last timestamp: {e}")
+
+def get_timeframe():
+    """
+    Get the first and last timestamp from the snapshots folder.
+    :return: First and last timestamp.
+    """
+    timezone = pytz.timezone('Etc/GMT-2')
     main_folder = 'analytics/snapshots'
     dates = list_folders(main_folder)
     files = list_all_files(main_folder, dates)
-    return last_timestamp(files)
+    timestamps = [int(x.split('/')[-1].split('.')[0]) for x in files]
+    min_timestamp = min(timestamps)
+    max_timestamp = max(timestamps)
+    min_timestamp = datetime.utcfromtimestamp(min_timestamp).astimezone(timezone).strftime('%Y-%m-%d %H:%M:%S')
+    max_timestamp = datetime.utcfromtimestamp(max_timestamp).astimezone(timezone).strftime('%Y-%m-%d %H:%M:%S')
 
-def get_stations(model, model_code, stations_master):
+    return min_timestamp, max_timestamp
+
+def get_stations(model, model_code):
     """
     Get the list of stations based on the specified model and model code.
     Validate model. Options: station, postcode, suburb, district, city
     :param model: Model type.
     :param model_code: Model code.
-    :param stations_master: DataFrame containing the stations' information.
     :return: List of stations.
     """
     stations = []
-    if model == 'station':
-        stations = [model_code]
-    elif model == 'postcode':
-        stations_master['post_code'] = stations_master['post_code'].astype(int).astype(str)
-        stations_master = stations_master[stations_master['post_code'] == model_code]
-    elif model == 'suburb':
-        stations_master = add_suburbs(stations_master)
-        stations_master = stations_master[stations_master['suburb_code'] == model_code]
-    elif model == 'district':
-        stations_master = add_districts(stations_master)
-        stations_master = stations_master[stations_master['district_code'] == model_code]
-    elif model == 'city':
-        # No need to filter
-        pass
-    else:
-        return 'Invalid model'
+    stations_master = get_station_information()
 
-    if len(stations) == 0:
-        stations = [str(int(station)) for station in stations_master['short_name'].tolist()]
+    if model == 'station':
+        stations = stations_master[stations_master['station_id'] == model_code]['station_id'].tolist()
+    elif model == 'postcode':
+        stations = stations_master[stations_master['post_code'] == model_code]['station_id'].tolist()
+    elif model == 'suburb':
+        stations = stations_master[stations_master['suburb_code'] == model_code]['station_id'].tolist()
+    elif model == 'district':
+        stations = stations_master[stations_master['district_code'] == model_code]['station_id'].tolist()
+    elif model == 'city':
+        stations = stations_master['station_id'].tolist()
+    else:
+        raise ValueError(f"Invalid model: {model}")
+
     return stations
 
 def json_to_dataframe(json_files):
@@ -370,4 +403,17 @@ motorized_vehicles = {
     'Nou Barris': 45229,
     'Sant Andreu': 43875,
     'Sant Martí': 68656,
+}
+
+district_mapping = {
+    'Ciutat Vella': '01',
+    'Eixample': '02', 
+    'Sants-Montjuïc': '03',
+    'Les Corts': '04',
+    'Sarrià-Sant Gervasi': '05',
+    'Gràcia': '06',
+    'Horta-Guinardó': '07',
+    'Nou Barris': '08',
+    'Sant Andreu': '09',
+    'Sant Martí': '10'
 }
