@@ -64,10 +64,21 @@ def filter_input_by_timeframe(files:list, from_date:str, to_date:str):
     """
     timezone = pytz.timezone('Etc/GMT-2')
     files_w_ts = {file:int(file.split('/')[-1].split('.')[0]) for file in files}
-    from_date = int(datetime.timestamp(datetime.strptime(from_date, '%Y-%m-%d').replace(tzinfo=pytz.utc).astimezone(timezone)))
-    to_date = int(datetime.timestamp(datetime.strptime(to_date, '%Y-%m-%d').replace(tzinfo=pytz.utc).astimezone(timezone)))
+    from_date = int(datetime.timestamp(datetime.strptime(correct_timestamp_format(from_date), '%Y-%m-%d %H:%M:%S').replace(tzinfo=pytz.utc).astimezone(timezone)))
+    to_date = int(datetime.timestamp(datetime.strptime(correct_timestamp_format(to_date), '%Y-%m-%d %H:%M:%S').replace(tzinfo=pytz.utc).astimezone(timezone)))
     files_filtered = [file for file in files if from_date <= files_w_ts[file] <= to_date]
     return files_filtered
+
+def correct_timestamp_format(timestamp:str):
+    """
+    Correct the timestamp format to 'YYYY-MM-DD %H:%M:%S' only if the timestamp is in the format 'YYYY-MM-DD'.
+    :param timestamp: Timestamp in the format 'YYYY-MM-DD'.
+    :return: Timestamp in the format 'YYYY-MM-DD %H:%M:%S'.
+    """
+    if len(timestamp.split(' ')) == 1:
+        return datetime.strptime(timestamp, '%Y-%m-%d').strftime('%Y-%m-%d %H:%M:%S')
+    else:
+        return timestamp
 
 def filter_input_by_timestamp(files:list, timestamp:str):
     """
@@ -77,7 +88,7 @@ def filter_input_by_timestamp(files:list, timestamp:str):
     :return: List of file paths with the closest timestamp to the specified date.
     """
     timezone = pytz.timezone('Etc/GMT-2')
-    target_time = int(datetime.timestamp(datetime.strptime(timestamp, '%Y-%m-%d').replace(tzinfo=pytz.utc).astimezone(timezone)))
+    target_time = int(datetime.timestamp(datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S').replace(tzinfo=pytz.utc).astimezone(timezone)))
     min_diff = float('inf')
     closest_file = None
 
@@ -90,30 +101,6 @@ def filter_input_by_timestamp(files:list, timestamp:str):
             closest_file = file
 
     return [closest_file]
-
-# Last timestamp function
-def last_timestamp(files):
-    """
-    Get the last timestamp from a list of files.
-    :param files: List of file paths.
-    :return: Last timestamp.
-    """
-
-    timestamp = max([int(file.split('/')[-1].split('.')[0]) for file in files])
-    return datetime.utcfromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
-
-def get_last_timestamp():
-    """
-    Get the last timestamp from the snapshots folder.
-    :return: Last timestamp.
-    """
-    try:
-        main_folder = 'analytics/snapshots'
-        dates = list_folders(main_folder)
-        files = list_all_files(main_folder, dates)
-        return last_timestamp(files)
-    except Exception as e:
-        raise ValueError(f"Error getting last timestamp: {e}")
 
 def get_timeframe():
     """
@@ -174,6 +161,35 @@ def json_to_dataframe(json_files):
 
         dataframes.append(df_data)
     return pd.concat(dataframes)
+
+
+########################################################
+# Less used functions
+########################################################
+
+# Last timestamp function
+def last_timestamp(files):
+    """
+    Get the last timestamp from a list of files.
+    :param files: List of file paths.
+    :return: Last timestamp.
+    """
+
+    timestamp = max([int(file.split('/')[-1].split('.')[0]) for file in files])
+    return datetime.utcfromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+
+def get_last_timestamp():
+    """
+    Get the last timestamp from the snapshots folder.
+    :return: Last timestamp.
+    """
+    try:
+        main_folder = 'analytics/snapshots'
+        dates = list_folders(main_folder)
+        files = list_all_files(main_folder, dates)
+        return last_timestamp(files)
+    except Exception as e:
+        raise ValueError(f"Error getting last timestamp: {e}")
 
 def get_dis_surb(lat, lon, geojson):
     """
