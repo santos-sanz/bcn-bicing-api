@@ -6,6 +6,7 @@ from typing import Optional
 from flow import flow
 from station_stats import station_stats
 from utils_local import *
+import datetime
 
 app = FastAPI()
 
@@ -87,6 +88,21 @@ def get_flow_data(
     aggregation_timeframe: str = '1h'
 ):
     try:
+        # Validate input parameters before calling flow
+        if not all([from_date, to_date, model, model_code]):
+            raise ValueError("Missing required parameters")
+        
+        # Validate date format
+        try:
+            datetime.datetime.strptime(from_date, '%Y-%m-%d %H:%M:%S')
+            datetime.datetime.strptime(to_date, '%Y-%m-%d %H:%M:%S')
+        except ValueError:
+            raise ValueError("Invalid date format. Use 'YYYY-MM-DD HH:MM:SS'")
+
+        # Validate output parameter
+        if output not in ['both', 'in', 'out']:
+            raise ValueError("Invalid output parameter. Must be 'both', 'in', or 'out'")
+
         response = flow(
             from_date=from_date,
             to_date=to_date,
@@ -96,7 +112,11 @@ def get_flow_data(
             aggregation_timeframe=aggregation_timeframe
         )
         return response
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        # Log the full error for debugging
+        print(f"Error in flow endpoint: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
     
 @app.get("/flow_now/")

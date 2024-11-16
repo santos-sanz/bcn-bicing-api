@@ -33,8 +33,7 @@ def flow(
 
 
     stations_data = json_to_dataframe(files) 
-    stations_master = get_station_information()
-    stations = get_stations(model, model_code, stations_master)
+    stations = get_stations(model, model_code)
 
     stations_data = stations_data[stations_data['station_id'].isin(stations)]
 
@@ -49,9 +48,22 @@ def flow(
     flow_agg['timestamp_file'] = pd.to_datetime(flow_agg['timestamp_file'], unit='s')
     
     flow_agg.set_index('timestamp_file', inplace=True)
-    flow_agg['in_bikes'] = flow_agg['in_bikes'].rolling(window=aggregation_timeframe).mean()
-    flow_agg['out_bikes'] = flow_agg['out_bikes'].rolling(window=aggregation_timeframe).mean()
-    flow_agg.reset_index(inplace=True)  
+    
+    # Convert aggregation_timeframe string to number of periods
+    if aggregation_timeframe.endswith('h'):
+        window_size = int(aggregation_timeframe[:-1])
+    elif aggregation_timeframe.endswith('m'):
+        window_size = int(aggregation_timeframe[:-1]) / 60
+    else:
+        raise ValueError("aggregation_timeframe must be in format '1h' or '30m'")
+        
+    # Calculate number of periods based on data frequency (assuming 5-minute intervals)
+    periods = int(window_size * 12)  # 12 five-minute periods per hour
+    
+    flow_agg['in_bikes'] = flow_agg['in_bikes'].rolling(window=periods).mean()
+    flow_agg['out_bikes'] = flow_agg['out_bikes'].rolling(window=periods).mean()
+    
+    flow_agg.reset_index(inplace=True)
 
     flow_agg.rename(columns={'timestamp_file': 'timestamp'}, inplace=True)
 
