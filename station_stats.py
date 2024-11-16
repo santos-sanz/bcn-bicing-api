@@ -51,11 +51,33 @@ def station_stats(
         'num_bikes_available': 'average_bikes_available',
         'num_docks_available': 'average_docks_available'
     })
+    #########################################################
+    ### AVAILABILITY METRICS
+    #########################################################
+
+    # Calculate percentage of time with 0 bikes available
+    zero_bikes_pct = stations_data.groupby('station_id').agg({
+        'num_bikes_available': lambda x: (x == 0).mean() * 100
+    }).reset_index()
+    zero_bikes_pct = zero_bikes_pct.rename(columns={
+        'num_bikes_available': 'pct_time_zero_bikes'
+    })
+    
+    # Calculate percentage of time with 0 docks available
+    zero_docks_pct = stations_data.groupby('station_id').agg({
+        'num_docks_available': lambda x: (x == 0).mean() * 100
+    }).reset_index()
+    zero_docks_pct = zero_docks_pct.rename(columns={
+        'num_docks_available': 'pct_time_zero_docks'
+    })
+    
+    # Merge with main dataframe
+    stations_data_agg = pd.merge(stations_data_agg, zero_bikes_pct, on='station_id', how='inner')
+    stations_data_agg = pd.merge(stations_data_agg, zero_docks_pct, on='station_id', how='inner')
 
     events = calculate_use_events(stations_data, duration_segs)
-
     stations_data_agg = pd.merge(stations_data_agg, events, on='station_id', how='inner')
-    
+ 
 
 
     return  stations_data_agg
