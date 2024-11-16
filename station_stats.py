@@ -77,10 +77,9 @@ def station_stats(
 
     events = calculate_use_events(stations_data, duration_segs)
     stations_data_agg = pd.merge(stations_data_agg, events, on='station_id', how='inner')
- 
-
-
-    return  stations_data_agg
+    
+    # Convert DataFrame to dictionary with native Python types
+    return stations_data_agg.to_dict(orient='records')
 
 
 def calculate_use_events(df, duration_segs):
