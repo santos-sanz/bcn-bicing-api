@@ -63,19 +63,24 @@ def flow(
     flow_agg['in_bikes'] = flow_agg['in_bikes'].rolling(window=periods).mean()
     flow_agg['out_bikes'] = flow_agg['out_bikes'].rolling(window=periods).mean()
     
+    # Fill NaN values with 0
+    flow_agg['in_bikes'] = flow_agg['in_bikes'].fillna(0)
+    flow_agg['out_bikes'] = flow_agg['out_bikes'].fillna(0)
+    
+    # Round values to 2 decimal places to avoid floating point issues
+    flow_agg['in_bikes'] = flow_agg['in_bikes'].round(2)
+    flow_agg['out_bikes'] = flow_agg['out_bikes'].round(2)
+    
     flow_agg.reset_index(inplace=True)
-
     flow_agg.rename(columns={'timestamp_file': 'timestamp'}, inplace=True)
-
     flow_agg['time'] = flow_agg['timestamp'].dt.strftime('%H:%M')
 
     # Output in json format
-
     if output == 'inflow':
-        return flow_agg[['time', 'in_bikes']].to_json(orient='records')
+        return flow_agg[['time', 'in_bikes']].to_dict('records')
     elif output == 'outflow':
-        return flow_agg[['time', 'out_bikes']].to_json(orient='records')
+        return flow_agg[['time', 'out_bikes']].to_dict('records')
     else:
-        return flow_agg[['time', 'in_bikes', 'out_bikes']].to_json(orient='records')
+        return flow_agg[['time', 'in_bikes', 'out_bikes']].to_dict('records')
 
 
