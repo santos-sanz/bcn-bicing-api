@@ -54,23 +54,23 @@ def station_stats(
     #########################################################
     ### AVAILABILITY METRICS
     #########################################################
-
-    # Calculate percentage of time with 0 bikes available
+    # Calculate percentage and percentile of time with 0 bikes available
     zero_bikes_pct = stations_data.groupby('station_id').agg({
         'num_bikes_available': lambda x: (x == 0).mean() * 100
     }).reset_index()
     zero_bikes_pct = zero_bikes_pct.rename(columns={
         'num_bikes_available': 'pct_time_zero_bikes'
     })
+    zero_bikes_pct['time_zero_bikes_percentile'] = zero_bikes_pct['pct_time_zero_bikes'].rank(pct=True)
     
-    # Calculate percentage of time with 0 docks available
+    # Calculate percentage and percentile of time with 0 docks available 
     zero_docks_pct = stations_data.groupby('station_id').agg({
         'num_docks_available': lambda x: (x == 0).mean() * 100
     }).reset_index()
     zero_docks_pct = zero_docks_pct.rename(columns={
         'num_docks_available': 'pct_time_zero_docks'
     })
-    
+    zero_docks_pct['time_zero_docks_percentile'] = zero_docks_pct['pct_time_zero_docks'].rank(pct=True)
     # Merge with main dataframe
     stations_data_agg = pd.merge(stations_data_agg, zero_bikes_pct, on='station_id', how='inner')
     stations_data_agg = pd.merge(stations_data_agg, zero_docks_pct, on='station_id', how='inner')
