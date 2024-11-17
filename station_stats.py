@@ -56,21 +56,21 @@ def station_stats(
     #########################################################
     # Calculate percentage and percentile of time with 0 bikes available
     zero_bikes_pct = stations_data.groupby('station_id').agg({
-        'num_bikes_available': lambda x: (x == 0).mean() * 100
+        'num_bikes_available': lambda x: (x == 0).mean() 
     }).reset_index()
     zero_bikes_pct = zero_bikes_pct.rename(columns={
         'num_bikes_available': 'pct_time_zero_bikes'
     })
-    zero_bikes_pct['time_zero_bikes_percentile'] = zero_bikes_pct['pct_time_zero_bikes'].rank(pct=True)
+    zero_bikes_pct['time_zero_bikes_percentile'] = zero_bikes_pct['pct_time_zero_bikes'].rank(pct=True, method='dense')
     
     # Calculate percentage and percentile of time with 0 docks available 
     zero_docks_pct = stations_data.groupby('station_id').agg({
-        'num_docks_available': lambda x: (x == 0).mean() * 100
+        'num_docks_available': lambda x: (x == 0).mean() 
     }).reset_index()
     zero_docks_pct = zero_docks_pct.rename(columns={
         'num_docks_available': 'pct_time_zero_docks'
     })
-    zero_docks_pct['time_zero_docks_percentile'] = zero_docks_pct['pct_time_zero_docks'].rank(pct=True)
+    zero_docks_pct['time_zero_docks_percentile'] = zero_docks_pct['pct_time_zero_docks'].rank(pct=True, method='dense')
     # Merge with main dataframe
     stations_data_agg = pd.merge(stations_data_agg, zero_bikes_pct, on='station_id', how='inner')
     stations_data_agg = pd.merge(stations_data_agg, zero_docks_pct, on='station_id', how='inner')
@@ -110,13 +110,13 @@ def calculate_use_events(df, duration_segs):
 
     # Calculate the percentile of use 
 
-    df['events_percentile'] = df['events'].rank(pct=True)
-    df['use_in_percentile'] = df['use_in'].rank(pct=True)
-    df['use_out_percentile'] = df['use_out'].rank(pct=True)
+    df['events_percentile'] = df['events'].rank(pct=True, method='dense')
+    df['use_in_percentile'] = df['use_in'].rank(pct=True, method='dense')
+    df['use_out_percentile'] = df['use_out'].rank(pct=True, method='dense')
 
-    df['events_per_day_capacity_percentile'] = df['events_per_day_capacity'].rank(pct=True)
-    df['use_in_per_day_capacity_percentile'] = df['use_in_per_day_capacity'].rank(pct=True)
-    df['use_out_per_day_capacity_percentile'] = df['use_out_per_day_capacity'].rank(pct=True)
+    df['events_per_day_capacity_percentile'] = df['events_per_day_capacity'].rank(pct=True, method='dense')
+    df['use_in_per_day_capacity_percentile'] = df['use_in_per_day_capacity'].rank(pct=True, method='dense')
+    df['use_out_per_day_capacity_percentile'] = df['use_out_per_day_capacity'].rank(pct=True, method='dense')
 
 
     return df
