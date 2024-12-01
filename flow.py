@@ -8,7 +8,8 @@ def flow(
         model: str,
         model_code: str,
         output: str = 'both',    
-        aggregation_timeframe: str = '1h'
+        aggregation_timeframe: str = '1h',
+        file_format: str = 'json'
 ):
     """
     This function returns the inflow, outflow or both of bikes for a given timeframe, model and model code.
@@ -18,8 +19,8 @@ def flow(
     :param model_code: str: model code
     :param output: str: inflow, outflow or both
     :param aggregation_timeframe: str: aggregation timeframe
+    :param file_format: str: 'json' or 'parquet' (default: 'json')
     """
-    
     
     # model types: station_level, postcode_level, suburb_level, district_level, city_level
     # model codes: station_id, postcode, suburb, district, city
@@ -29,12 +30,22 @@ def flow(
     
     dates = list_folders(main_folder)
     files = list_all_files(main_folder, dates)
+    
+    # Filter files by format
+    if file_format == 'parquet':
+        files = [f for f in files if f.endswith('.parquet')]
+    else:
+        files = [f for f in files if f.endswith('.json')]
+        
     files = filter_input_by_timeframe(files, from_date, to_date)
 
+    # Read data based on file format
+    if file_format == 'parquet':
+        stations_data = read_parquet_files(files)
+    else:
+        stations_data = json_to_dataframe(files)
 
-    stations_data = json_to_dataframe(files) 
     stations = get_stations(model, model_code)
-
     stations_data = stations_data[stations_data['station_id'].isin(stations)]
 
     stations_data_filtered = stations_data[['timestamp_file', 'station_id', 'num_bikes_available']].sort_values(by=['station_id','timestamp_file'])
@@ -82,5 +93,33 @@ def flow(
         return flow_agg[['time', 'out_bikes']].to_dict('records')
     else:
         return flow_agg[['time', 'in_bikes', 'out_bikes']].to_dict('records')
+
+def flow_parquet(
+        from_date: str,
+        to_date: str,
+        model: str,
+        model_code: str,
+        output: str = 'both',    
+        aggregation_timeframe: str = '1h'
+):
+    """
+    Convenience function to get flow statistics from Parquet files.
+    This is equivalent to calling flow with file_format='parquet'.
+    :param from_date: str: start date
+    :param to_date: str: end date
+    :param model: str: model type
+    :param model_code: str: model code
+    :param output: str: inflow, outflow or both
+    :param aggregation_timeframe: str: aggregation timeframe
+    """
+    return flow(
+        from_date=from_date,
+        to_date=to_date,
+        model=model,
+        model_code=model_code,
+        output=output,
+        aggregation_timeframe=aggregation_timeframe,
+        file_format='parquet'
+    )
 
 

@@ -162,6 +162,46 @@ def json_to_dataframe(json_files):
         dataframes.append(df_data)
     return pd.concat(dataframes)
 
+def read_parquet_files(parquet_files):
+    """
+    Read a list of Parquet files into a single pandas DataFrame.
+    :param parquet_files: List of paths to Parquet files.
+    :return: pandas DataFrame containing all data from Parquet files.
+    """
+    dataframes = []
+    for parquet_file in parquet_files:
+        df_data = pd.read_parquet(parquet_file)
+        df_data['file'] = parquet_file
+        df_data['timestamp_file'] = os.path.basename(parquet_file).split('.')[0]
+        dataframes.append(df_data)
+    return pd.concat(dataframes)
+
+def filter_parquet_by_timeframe(main_folder, from_date, to_date):
+    """
+    Read and filter Parquet files within a specified date range.
+    :param main_folder: Path to the main folder containing Parquet files.
+    :param from_date: Start date in the format 'YYYY-MM-DD' or 'YYYY-MM-DD HH:MM:SS'.
+    :param to_date: End date in the format 'YYYY-MM-DD' or 'YYYY-MM-DD HH:MM:SS'.
+    :return: pandas DataFrame containing filtered data.
+    """
+    dates = list_folders(main_folder)
+    all_files = list_all_files(main_folder, dates)
+    parquet_files = [f for f in all_files if f.endswith('.parquet')]
+    filtered_files = filter_input_by_timeframe(parquet_files, from_date, to_date)
+    return read_parquet_files(filtered_files)
+
+def get_parquet_snapshot(main_folder, timestamp):
+    """
+    Get the closest snapshot to a specific timestamp from Parquet files.
+    :param main_folder: Path to the main folder containing Parquet files.
+    :param timestamp: Target timestamp in the format 'YYYY-MM-DD HH:MM:SS'.
+    :return: pandas DataFrame containing the closest snapshot data.
+    """
+    dates = list_folders(main_folder)
+    all_files = list_all_files(main_folder, dates)
+    parquet_files = [f for f in all_files if f.endswith('.parquet')]
+    closest_file = filter_input_by_timestamp(parquet_files, timestamp)[0]
+    return read_parquet_files([closest_file])
 
 ########################################################
 # Less used functions

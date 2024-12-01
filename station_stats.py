@@ -4,14 +4,16 @@ def station_stats(
         from_date: str,
         to_date: str,
         model: str,
-        model_code: str
+        model_code: str,
+        file_format: str = 'json'
 ):
     """
-    This function returns the number of stations, the sum of bikes available and the sum of docks available for a given timestamp, model and model code.
+    This function returns station statistics for a given time period and model.
     :param from_date: str: start date
     :param to_date: str: end date
     :param model: str: model type
     :param model_code: str: model code
+    :param file_format: str: 'json' or 'parquet' (default: 'json')
     """
     
     # model types: station_level, postcode_level, suburb_level, district_level, city_level
@@ -22,10 +24,23 @@ def station_stats(
     
     dates = list_folders(main_folder)
     files = list_all_files(main_folder, dates)
+    
+    # Filter files by format
+    if file_format == 'parquet':
+        files = [f for f in files if f.endswith('.parquet')]
+    else:
+        files = [f for f in files if f.endswith('.json')]
+    
     files = filter_input_by_timeframe(files, from_date, to_date)
 
     duration_segs = (pd.to_datetime(to_date) - pd.to_datetime(from_date)).total_seconds()
-    stations_data = json_to_dataframe(files) 
+    
+    # Read data based on file format
+    if file_format == 'parquet':
+        stations_data = read_parquet_files(files)
+    else:
+        stations_data = json_to_dataframe(files)
+    
     stations_master = get_station_information()
 
     stations = get_stations(model, model_code)
@@ -42,7 +57,6 @@ def station_stats(
     ### METRICS
     #########################################################
 
-  
     stations_data_agg = stations_data.groupby('station_id').agg({
         'num_bikes_available': 'mean',
         'num_docks_available': 'mean'
@@ -51,6 +65,7 @@ def station_stats(
         'num_bikes_available': 'average_bikes_available',
         'num_docks_available': 'average_docks_available'
     })
+    
     #########################################################
     ### AVAILABILITY METRICS
     #########################################################
@@ -71,6 +86,7 @@ def station_stats(
         'num_docks_available': 'pct_time_zero_docks'
     })
     zero_docks_pct['time_zero_docks_percentile'] = zero_docks_pct['pct_time_zero_docks'].rank(pct=True, method='dense')
+    
     # Merge with main dataframe
     stations_data_agg = pd.merge(stations_data_agg, zero_bikes_pct, on='station_id', how='inner')
     stations_data_agg = pd.merge(stations_data_agg, zero_docks_pct, on='station_id', how='inner')
@@ -81,6 +97,71 @@ def station_stats(
     # Convert DataFrame to dictionary with native Python types
     return stations_data_agg.to_dict(orient='records')
 
+def station_stats_parquet(
+        from_date: str,
+        to_date: str,
+        model: str,
+        model_code: str
+):
+    """
+    Convenience function to get station statistics from Parquet files.
+    This is equivalent to calling station_stats with file_format='parquet'.
+    :param from_date: str: start date
+    :param to_date: str: end date
+    :param model: str: model type
+    :param model_code: str: model code
+    """
+    return station_stats(from_date, to_date, model, model_code, file_format='parquet')
+
+def get_snapshot_stats(
+        timestamp: str,
+        model: str,
+        model_code: str,
+        file_format: str = 'json'
+):
+    """
+    Get station statistics for a specific timestamp.
+    :param timestamp: str: target timestamp
+    :param model: str: model type
+    :param model_code: str: model code
+    :param file_format: str: 'json' or 'parquet' (default: 'json')
+    """
+    main_folder = 'analytics/snapshots'
+    dates = list_folders(main_folder)
+    files = list_all_files(main_folder, dates)
+    
+    # Filter files by format
+    if file_format == 'parquet':
+        files = [f for f in files if f.endswith('.parquet')]
+    else:
+        files = [f for f in files if f.endswith('.json')]
+    
+    closest_file = filter_input_by_timestamp(files, timestamp)[0]
+    
+    # Read data based on file format
+    if file_format == 'parquet':
+        stations_data = read_parquet_files([closest_file])
+    else:
+        stations_data = json_to_dataframe([closest_file])
+    
+    stations = get_stations(model, model_code)
+    stations_data = stations_data[stations_data['station_id'].isin(stations)]
+    
+    return stations_data.to_dict(orient='records')
+
+def get_snapshot_stats_parquet(
+        timestamp: str,
+        model: str,
+        model_code: str
+):
+    """
+    Convenience function to get snapshot statistics from Parquet files.
+    This is equivalent to calling get_snapshot_stats with file_format='parquet'.
+    :param timestamp: str: target timestamp
+    :param model: str: model type
+    :param model_code: str: model code
+    """
+    return get_snapshot_stats(timestamp, model, model_code, file_format='parquet')
 
 def calculate_use_events(df, duration_segs):
     """
