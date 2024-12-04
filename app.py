@@ -91,7 +91,7 @@ class FlowRequest(BaseModel):
     model_code: str
     output: Optional[str] = 'both'
     aggregation_timeframe: Optional[str] = '1h'
-    format: FileFormat = FileFormat.json
+    format: FileFormat = FileFormat.parquet
 
 @app.get("/flow/")
 def get_flow_data(
@@ -101,7 +101,7 @@ def get_flow_data(
     model_code: str,
     output: str = 'both',
     aggregation_timeframe: str = '1h',
-    format: FileFormat = FileFormat.json
+    format: FileFormat = FileFormat.parquet
 ):
     try:
         # Validate input parameters before calling flow
@@ -149,7 +149,7 @@ def get_flow_data(
 def get_flow_data_now(
     model: str,
     model_code: str,
-    format: FileFormat = FileFormat.json
+    format: FileFormat = FileFormat.parquet
 ):
     try:
         if format == FileFormat.parquet:

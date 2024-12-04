@@ -157,8 +157,7 @@ def json_to_dataframe(json_files):
             data = json.load(f)
         df_data = pd.json_normalize(data['data']['stations'])
         df_data['file'] = json_file
-        df_data['timestamp_file'] = os.path.basename(json_file).split('.')[0]
-
+        df_data['timestamp_file'] = float(os.path.basename(json_file).split('.')[0])
         dataframes.append(df_data)
     return pd.concat(dataframes)
 
