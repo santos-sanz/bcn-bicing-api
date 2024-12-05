@@ -1,6 +1,8 @@
 from utils_local import *
 import pytz
 import os
+from datetime import datetime, timedelta
+from dateutil.relativedelta import relativedelta
 
 
 def flow(
@@ -19,9 +21,32 @@ def flow(
     :param model: str: model type
     :param model_code: str: model code
     :param output: str: inflow, outflow or both
-    :param aggregation_timeframe: str: aggregation timeframe
+    :param aggregation_timeframe: str: aggregation timeframe (e.g., '30m', '1h', '1d', '1w', '1M')
     :param file_format: str: 'json' or 'parquet' (default: 'json')
     """
+    
+    # Extract time adjustment from aggregation_timeframe
+    value = int(aggregation_timeframe[:-1])
+    unit = aggregation_timeframe[-1]
+    
+    from_date_dt = pd.to_datetime(from_date)
+    
+    # Calculate adjustment based on unit
+    if unit == 'h':
+        adjustment = timedelta(hours=value)
+    elif unit == 'm':
+        adjustment = timedelta(minutes=value)
+    elif unit == 'd':
+        adjustment = timedelta(days=value)
+    elif unit == 'w':
+        adjustment = timedelta(weeks=value)
+    elif unit == 'M':
+        adjustment = relativedelta(months=value)
+    else:
+        raise ValueError("aggregation_timeframe must be in format: '30m', '1h', '1d', '1w', or '1M'")
+    
+    # Adjust from_date based on aggregation window
+    adjusted_from_date = (from_date_dt - adjustment).strftime('%Y-%m-%d %H:%M:%S')
     
     # model types: station_level, postcode_level, suburb_level, district_level, city_level
     # model codes: station_id, postcode, suburb, district, city
@@ -41,7 +66,7 @@ def flow(
                 # Convert timestamp and filter by date range
                 # print("Debug: Converting and filtering timestamps...")
                 raw_data['timestamp'] = pd.to_datetime(raw_data['timestamp'])
-                date_mask = (raw_data['timestamp'] >= pd.to_datetime(from_date)) & \
+                date_mask = (raw_data['timestamp'] >= pd.to_datetime(adjusted_from_date)) & \
                            (raw_data['timestamp'] <= pd.to_datetime(to_date))
                 raw_data = raw_data[date_mask].copy()
                 # print(f"Debug: Filtered data shape: {raw_data.shape}")
@@ -85,7 +110,7 @@ def flow(
         dates = list_folders(main_folder)
         files = list_all_files(main_folder, dates)
         files = [f for f in files if f.endswith('.json')]
-        files = filter_input_by_timeframe(files, from_date, to_date)
+        files = filter_input_by_timeframe(files, adjusted_from_date, to_date)
         stations_data = json_to_dataframe(files)
 
     stations = get_stations(model, model_code)
@@ -104,16 +129,18 @@ def flow(
 
     flow_agg = stations_data_filtered.groupby('timestamp_file')[['in_bikes', 'out_bikes']].sum().reset_index()
     
-    # Convert aggregation_timeframe string to number of periods
-    if aggregation_timeframe.endswith('h'):
-        window_size = int(aggregation_timeframe[:-1])
-    elif aggregation_timeframe.endswith('m'):
-        window_size = int(aggregation_timeframe[:-1]) / 60
-    else:
-        raise ValueError("aggregation_timeframe must be in format '1h' or '30m'")
-        
     # Calculate number of periods based on data frequency (assuming 5-minute intervals)
-    periods = int(window_size * 12)  # 12 five-minute periods per hour
+    if unit == 'h':
+        periods = int(value * 12)  # 12 five-minute periods per hour
+    elif unit == 'm':
+        periods = int(value / 5)  # Convert minutes to number of 5-minute periods
+    elif unit == 'd':
+        periods = int(value * 24 * 12)  # 24 hours * 12 periods per hour
+    elif unit == 'w':
+        periods = int(value * 7 * 24 * 12)  # 7 days * 24 hours * 12 periods per hour
+    elif unit == 'M':
+        # Approximate a month as 30 days
+        periods = int(value * 30 * 24 * 12)  # 30 days * 24 hours * 12 periods per hour
     
     # Set timestamp as index for rolling operations
     flow_agg.set_index('timestamp_file', inplace=True)
@@ -129,6 +156,10 @@ def flow(
     flow_agg['in_bikes'] = flow_agg['in_bikes'].round(2)
     flow_agg['out_bikes'] = flow_agg['out_bikes'].round(2)
     
+    # After all calculations are done, filter out the adjustment period we added at the beginning
+    flow_agg = flow_agg[flow_agg.index >= from_date_dt]
+    
+    # Reset index and format time after filtering
     flow_agg.reset_index(inplace=True)
     flow_agg['time'] = flow_agg['timestamp_file'].dt.strftime('%H:%M')
 
