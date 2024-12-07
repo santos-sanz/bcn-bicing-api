@@ -32,6 +32,7 @@ app = FastAPI(
         "url": "https://github.com/santos-sanz",
         "email": "asantossanz@uoc.edu",
     },
+    redirect_slashes=False
 )
 
 # Get environment variables
@@ -62,7 +63,7 @@ app.add_middleware(
 def read_root():
     return {"message": "Welcome to the BCN Bicing Analytics API!"}
 
-@app.get("/timeframe/",
+@app.get("/timeframe",
     summary="Get Data Timeframe",
     description="Returns the earliest and latest timestamps available in the dataset",
     response_description="Object containing from_date, to_date, and format used"
@@ -100,7 +101,7 @@ class StationStats(BaseModel):
     station_code: str = Field(..., description="Specific station identifier")
     format: FileFormat = Field(default=FileFormat.json, description="Data format (json or parquet)")
 
-@app.get("/stats/",
+@app.get("/stats",
     summary="Get Station Statistics",
     description="Retrieve statistical data for a specific station over a time period",
     response_description="Statistical data for the requested station"
@@ -161,7 +162,7 @@ class FlowRequest(BaseModel):
     )
     format: FileFormat = Field(default=FileFormat.parquet, description="Data format (json or parquet)")
 
-@app.get("/flow/",
+@app.get("/flow",
     summary="Get Station Flow Analysis",
     description="""
     Analyze bike flow (incoming/outgoing) for a specific station over a time period.
@@ -238,7 +239,7 @@ def get_flow_data(
         print(f"Error in flow endpoint: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
     
-@app.get("/flow_now/",
+@app.get("/flow_now",
     summary="Get Recent Flow Analysis",
     description="Get flow analysis for the last 24 hours for a specific station",
     response_description="Recent flow analysis data for the requested station"
