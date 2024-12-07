@@ -102,15 +102,23 @@ def filter_input_by_timestamp(files:list, timestamp:str):
 
     return [closest_file]
 
-def get_timeframe():
+def get_timeframe(file_format='json'):
     """
-    Get the first and last timestamp from the snapshots folder.
+    Get the first and last timestamp from the snapshots or parcel folder.
+    :param file_format: Data format ('json' for snapshots, 'parquet' for parcel)
     :return: First and last timestamp.
     """
     timezone = pytz.timezone('Etc/GMT-2')
     main_folder = 'analytics/snapshots'
     dates = list_folders(main_folder)
     files = list_all_files(main_folder, dates)
+    
+    # Filter files by format
+    if file_format == 'parquet':
+        files = [f for f in files if f.endswith('.parquet')]
+    else:
+        files = [f for f in files if f.endswith('.json')]
+        
     timestamps = [int(x.split('/')[-1].split('.')[0]) for x in files]
     min_timestamp = min(timestamps)
     max_timestamp = max(timestamps)
@@ -118,6 +126,14 @@ def get_timeframe():
     max_timestamp = datetime.utcfromtimestamp(max_timestamp).astimezone(timezone).strftime('%Y-%m-%d %H:%M:%S')
 
     return min_timestamp, max_timestamp
+
+def get_timeframe_parquet():
+    """
+    Convenience function to get timeframe from Parquet files.
+    This is equivalent to calling get_timeframe with file_format='parquet'.
+    :return: First and last timestamp.
+    """
+    return get_timeframe(file_format='parquet')
 
 def get_stations(model, model_code):
     """

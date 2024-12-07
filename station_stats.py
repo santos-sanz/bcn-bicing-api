@@ -1,4 +1,5 @@
 from utils_local import *
+import os
 
 def station_stats(
         from_date: str,
@@ -21,25 +22,58 @@ def station_stats(
 
     # Load data: To change in cloud environment
     main_folder = 'analytics/snapshots'
+    single_parquet = main_folder + '/all_data.parquet'
     
-    dates = list_folders(main_folder)
-    files = list_all_files(main_folder, dates)
-    
-    # Filter files by format
+    # Handle Parquet file reading
     if file_format == 'parquet':
-        files = [f for f in files if f.endswith('.parquet')]
+        if os.path.exists(single_parquet):
+            try:
+                raw_data = pd.read_parquet(single_parquet)
+                
+                # Convert timestamp and filter by date range
+                raw_data['timestamp'] = pd.to_datetime(raw_data['timestamp'])
+                date_mask = (raw_data['timestamp'] >= pd.to_datetime(from_date)) & \
+                           (raw_data['timestamp'] <= pd.to_datetime(to_date))
+                raw_data = raw_data[date_mask].copy()
+                
+                if len(raw_data) == 0:
+                    raise ValueError(f"No data found in Parquet file for date range {from_date} to {to_date}")
+                
+                # Process each row and extract station data
+                all_stations = []
+                for _, row in raw_data.iterrows():
+                    try:
+                        stations = row['data']['stations']
+                        for station in stations:
+                            station_record = {
+                                'station_id': str(station.get('station_id', '')),
+                                'num_bikes_available': station.get('num_bikes_available', 0),
+                                'num_docks_available': station.get('num_docks_available', 0),
+                                'timestamp_file': row['timestamp']
+                            }
+                            all_stations.append(station_record)
+                    except Exception as e:
+                        continue
+                
+                if not all_stations:
+                    raise ValueError("No valid station data found after processing")
+                
+                # Create DataFrame with only the needed columns
+                stations_data = pd.DataFrame(all_stations)
+                
+            except Exception as e:
+                raise ValueError(f"Error reading Parquet file: {str(e)}")
+        else:
+            raise ValueError(f"Parquet file not found at {single_parquet}")
     else:
+        # Original JSON processing
+        dates = list_folders(main_folder)
+        files = list_all_files(main_folder, dates)
         files = [f for f in files if f.endswith('.json')]
-    
-    files = filter_input_by_timeframe(files, from_date, to_date)
+        files = filter_input_by_timeframe(files, from_date, to_date)
+        stations_data = json_to_dataframe(files)
 
     duration_segs = (pd.to_datetime(to_date) - pd.to_datetime(from_date)).total_seconds()
-    
-    # Read data based on file format
-    if file_format == 'parquet':
-        stations_data = read_parquet_files(files)
-    else:
-        stations_data = json_to_dataframe(files)
     
     stations_master = get_station_information()
 
@@ -127,21 +161,52 @@ def get_snapshot_stats(
     :param file_format: str: 'json' or 'parquet' (default: 'json')
     """
     main_folder = 'analytics/snapshots'
-    dates = list_folders(main_folder)
-    files = list_all_files(main_folder, dates)
+    single_parquet = main_folder + '/all_data.parquet'
     
-    # Filter files by format
+    # Handle Parquet file reading
     if file_format == 'parquet':
-        files = [f for f in files if f.endswith('.parquet')]
+        if os.path.exists(single_parquet):
+            try:
+                raw_data = pd.read_parquet(single_parquet)
+                
+                # Convert timestamp to datetime for comparison
+                raw_data['timestamp'] = pd.to_datetime(raw_data['timestamp'])
+                target_time = pd.to_datetime(timestamp)
+                
+                # Find closest timestamp
+                raw_data['time_diff'] = abs(raw_data['timestamp'] - target_time)
+                closest_row = raw_data.loc[raw_data['time_diff'].idxmin()]
+                
+                # Process station data from closest timestamp
+                all_stations = []
+                try:
+                    stations = closest_row['data']['stations']
+                    for station in stations:
+                        station_record = {
+                            'station_id': str(station.get('station_id', '')),
+                            'num_bikes_available': station.get('num_bikes_available', 0),
+                            'num_docks_available': station.get('num_docks_available', 0),
+                            'timestamp_file': closest_row['timestamp']
+                        }
+                        all_stations.append(station_record)
+                except Exception as e:
+                    raise ValueError(f"Error processing station data: {str(e)}")
+                
+                if not all_stations:
+                    raise ValueError("No valid station data found")
+                
+                stations_data = pd.DataFrame(all_stations)
+                
+            except Exception as e:
+                raise ValueError(f"Error reading Parquet file: {str(e)}")
+        else:
+            raise ValueError(f"Parquet file not found at {single_parquet}")
     else:
+        # Original JSON processing
+        dates = list_folders(main_folder)
+        files = list_all_files(main_folder, dates)
         files = [f for f in files if f.endswith('.json')]
-    
-    closest_file = filter_input_by_timestamp(files, timestamp)[0]
-    
-    # Read data based on file format
-    if file_format == 'parquet':
-        stations_data = read_parquet_files([closest_file])
-    else:
+        closest_file = filter_input_by_timestamp(files, timestamp)[0]
         stations_data = json_to_dataframe([closest_file])
     
     stations = get_stations(model, model_code)
