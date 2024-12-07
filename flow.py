@@ -53,7 +53,7 @@ def flow(
 
     # Load data: To change in cloud environment
     main_folder = 'analytics/snapshots'
-    single_parquet = main_folder + '/all_data.parquet'
+    single_parquet = 'data/2023/data.parquet'
     
     # Handle Parquet file reading
     if file_format == 'parquet':
