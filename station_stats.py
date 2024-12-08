@@ -4,39 +4,67 @@ import io
 import logging
 import pandas as pd
 from datetime import datetime, timedelta
+import psutil
+import gc
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
+def get_memory_usage():
+    """Get current memory usage in MB"""
+    process = psutil.Process(os.getpid())
+    mem = process.memory_info().rss / 1024 / 1024  # Convert to MB
+    logger.info(f"Current memory usage: {mem:.2f} MB")
+    return mem
+
+def force_garbage_collection():
+    """Force garbage collection and log memory usage"""
+    before = get_memory_usage()
+    gc.collect()
+    after = get_memory_usage()
+    logger.info(f"Garbage collection freed {before - after:.2f} MB")
+
 def process_stations_chunk(chunk, from_date_dt, to_date_dt):
     """Helper function to process a chunk of data"""
-    # Convert timestamp and filter by date range
-    chunk['timestamp'] = pd.to_datetime(chunk['timestamp'])
-    date_mask = (chunk['timestamp'] >= from_date_dt) & \
-                (chunk['timestamp'] <= to_date_dt)
-    chunk = chunk[date_mask]
-    
-    if len(chunk) == 0:
-        return []
+    try:
+        # Convert timestamp and filter by date range
+        chunk['timestamp'] = pd.to_datetime(chunk['timestamp'])
+        date_mask = (chunk['timestamp'] >= from_date_dt) & \
+                    (chunk['timestamp'] <= to_date_dt)
+        chunk = chunk[date_mask]
+        
+        if len(chunk) == 0:
+            return []
 
-    # Process each row and extract station data
-    all_stations = []
-    for _, row in chunk.iterrows():
-        try:
-            stations = row['data']['stations']
-            for station in stations:
-                station_record = {
-                    'station_id': str(station.get('station_id', '')),
-                    'num_bikes_available': station.get('num_bikes_available', 0),
-                    'num_docks_available': station.get('num_docks_available', 0),
-                    'timestamp_file': row['timestamp']
-                }
-                all_stations.append(station_record)
-        except Exception as e:
-            logger.warning(f"Error processing row: {str(e)}")
-            continue
-    
-    return all_stations
+        # Process each row and extract station data
+        all_stations = []
+        for _, row in chunk.iterrows():
+            try:
+                stations = row['data']['stations']
+                for station in stations:
+                    station_record = {
+                        'station_id': str(station.get('station_id', '')),
+                        'num_bikes_available': station.get('num_bikes_available', 0),
+                        'num_docks_available': station.get('num_docks_available', 0),
+                        'timestamp_file': row['timestamp']
+                    }
+                    all_stations.append(station_record)
+            except Exception as e:
+                logger.warning(f"Error processing row: {str(e)}")
+                continue
+        
+        return all_stations
+    except Exception as e:
+        logger.error(f"Error in process_stations_chunk: {str(e)}")
+        return []
+    finally:
+        # Clean up references
+        if 'chunk' in locals():
+            del chunk
+        if 'stations' in locals():
+            del stations
+        if 'row' in locals():
+            del row
 
 def station_stats(
         from_date: str,
@@ -54,143 +82,198 @@ def station_stats(
     :param file_format: str: 'json' or 'parquet' (default: 'json')
     """
     
-    # model types: station_level, postcode_level, suburb_level, district_level, city_level
-    # model codes: station_id, postcode, suburb, district, city
-
-    # Load data
-    main_folder = 'analytics/snapshots'
+    initial_memory = get_memory_usage()
+    logger.info(f"Starting station_stats with {initial_memory:.2f} MB memory usage")
     
-    # Handle Parquet file reading
-    if file_format == 'parquet':
-        try:
-            logger.info("Attempting to connect to S3...")
-            # Read parquet file from S3
-            try:
-                response = s3_client.get_object(
-                    Bucket='bicingdata',
-                    Key='2023/data.parquet'
-                )
-                logger.info("Successfully retrieved object from S3")
-            except Exception as s3_error:
-                logger.error(f"S3 connection error: {str(s3_error)}")
-                raise ValueError(f"Failed to connect to S3: {str(s3_error)}")
+    if initial_memory > 400:  # 400MB threshold
+        logger.warning("High initial memory usage detected")
+        force_garbage_collection()
+    
+    try:
+        # model types: station_level, postcode_level, suburb_level, district_level, city_level
+        # model codes: station_id, postcode, suburb, district, city
 
+        # Load data
+        main_folder = 'analytics/snapshots'
+        
+        # Handle Parquet file reading
+        if file_format == 'parquet':
             try:
-                logger.info("Reading response body...")
-                body_data = response['Body'].read()
-                logger.info(f"Response body size: {len(body_data):,} bytes")
-                parquet_file = io.BytesIO(body_data)
-                logger.info("Successfully read response body")
-            except Exception as body_error:
-                logger.error(f"Error reading response body: {str(body_error)}")
-                raise ValueError(f"Failed to read response body: {str(body_error)}")
+                logger.info("Attempting to connect to S3...")
+                # Read parquet file from S3
+                try:
+                    response = s3_client.get_object(
+                        Bucket='bicingdata',
+                        Key='2023/data.parquet'
+                    )
+                    logger.info("Successfully retrieved object from S3")
+                except Exception as s3_error:
+                    logger.error(f"S3 connection error: {str(s3_error)}")
+                    raise ValueError(f"Failed to connect to S3: {str(s3_error)}")
 
-            # Convert date strings to datetime objects
-            from_date_dt = pd.to_datetime(from_date)
-            to_date_dt = pd.to_datetime(to_date)
-
-            try:
-                logger.info("Starting Parquet parsing...")
-                # Process the file in chunks
-                all_stations = []
-                chunk_size = 1000  # Adjust this value based on your memory constraints
-                
-                # Only read the columns we need
-                for chunk in pd.read_parquet(parquet_file, columns=['timestamp', 'data']):
-                    chunk_stations = process_stations_chunk(chunk, from_date_dt, to_date_dt)
-                    all_stations.extend(chunk_stations)
+                try:
+                    logger.info("Reading response body...")
+                    body_data = response['Body'].read()
+                    body_size_mb = len(body_data) / 1024 / 1024
+                    logger.info(f"Response body size: {body_size_mb:.2f} MB")
                     
-                    # Free up memory
-                    del chunk
+                    if body_size_mb > 300:  # If body data is larger than 300MB
+                        logger.warning("Large response body detected, may cause memory issues")
                     
-                logger.info(f"Successfully processed all chunks. Total records: {len(all_stations)}")
-                
-                if not all_stations:
-                    raise ValueError("No valid station data found after processing")
-                
-                # Create DataFrame with only the needed columns
-                stations_data = pd.DataFrame(all_stations)
-                
-            except Exception as parquet_error:
-                logger.error(f"Error parsing Parquet file: {str(parquet_error)}")
-                logger.error(f"Error type: {type(parquet_error)}")
-                import traceback
-                logger.error(f"Full traceback: {traceback.format_exc()}")
-                raise ValueError(f"Failed to parse Parquet file: {str(parquet_error)}")
-            finally:
-                # Clean up
-                if 'parquet_file' in locals():
-                    parquet_file.close()
-                if 'body_data' in locals():
+                    parquet_file = io.BytesIO(body_data)
+                    logger.info("Successfully read response body")
+                    
+                    # Clear body_data from memory
                     del body_data
-            
-        except Exception as e:
-            logger.error(f"Error in S3 data retrieval process: {str(e)}")
-            raise ValueError(f"Failed to retrieve data from S3: {str(e)}")
-    else:
-        # Original JSON processing
-        dates = list_folders(main_folder)
-        files = list_all_files(main_folder, dates)
-        files = [f for f in files if f.endswith('.json')]
-        files = filter_input_by_timeframe(files, from_date, to_date)
-        stations_data = json_to_dataframe(files)
+                    force_garbage_collection()
+                    
+                except Exception as body_error:
+                    logger.error(f"Error reading response body: {str(body_error)}")
+                    raise ValueError(f"Failed to read response body: {str(body_error)}")
 
-    stations = get_stations(model, model_code)
-    stations_data = stations_data[stations_data['station_id'].isin(stations)]
-    
-    stations_master = get_station_information()
-    stations_master['station_id'] = stations_master['station_id'].astype(int).astype(str)
-    stations_master = stations_master[stations_master['station_id'].isin(stations)]
+                # Convert date strings to datetime objects
+                from_date_dt = pd.to_datetime(from_date)
+                to_date_dt = pd.to_datetime(to_date)
 
-    stations_master = stations_master[['station_id', 'capacity']]
-    stations_data = stations_data[['station_id', 'num_bikes_available', 'num_docks_available', 'timestamp_file']]
+                try:
+                    logger.info("Starting Parquet parsing...")
+                    # Process the file in chunks
+                    all_stations = []
+                    chunk_size = 100  # Reduced chunk size for memory constraints
+                    processed_chunks = 0
+                    
+                    # Only read the columns we need
+                    for chunk in pd.read_parquet(parquet_file, columns=['timestamp', 'data']):
+                        chunk_stations = process_stations_chunk(chunk, from_date_dt, to_date_dt)
+                        all_stations.extend(chunk_stations)
+                        
+                        processed_chunks += 1
+                        if processed_chunks % 10 == 0:  # Log every 10 chunks
+                            current_memory = get_memory_usage()
+                            logger.info(f"Processed {processed_chunks} chunks, current memory: {current_memory:.2f} MB")
+                            
+                            if current_memory > 400:  # 400MB threshold
+                                logger.warning("High memory usage detected during processing")
+                                force_garbage_collection()
+                        
+                        # Free up memory
+                        del chunk
+                        
+                    logger.info(f"Successfully processed all chunks. Total records: {len(all_stations)}")
+                    
+                    if not all_stations:
+                        raise ValueError("No valid station data found after processing")
+                    
+                    # Create DataFrame with only the needed columns
+                    stations_data = pd.DataFrame(all_stations)
+                    
+                    # Clear all_stations list from memory
+                    del all_stations
+                    force_garbage_collection()
+                    
+                except Exception as parquet_error:
+                    logger.error(f"Error parsing Parquet file: {str(parquet_error)}")
+                    logger.error(f"Error type: {type(parquet_error)}")
+                    import traceback
+                    logger.error(f"Full traceback: {traceback.format_exc()}")
+                    raise ValueError(f"Failed to parse Parquet file: {str(parquet_error)}")
+                finally:
+                    # Clean up
+                    if 'parquet_file' in locals():
+                        parquet_file.close()
+                    force_garbage_collection()
+                
+            except Exception as e:
+                logger.error(f"Error in S3 data retrieval process: {str(e)}")
+                raise ValueError(f"Failed to retrieve data from S3: {str(e)}")
+        else:
+            # Original JSON processing
+            dates = list_folders(main_folder)
+            files = list_all_files(main_folder, dates)
+            files = [f for f in files if f.endswith('.json')]
+            files = filter_input_by_timeframe(files, from_date, to_date)
+            stations_data = json_to_dataframe(files)
 
-    stations_data = pd.merge(stations_data, stations_master, on='station_id', how='inner')
+        stations = get_stations(model, model_code)
+        stations_data = stations_data[stations_data['station_id'].isin(stations)]
+        
+        stations_master = get_station_information()
+        stations_master['station_id'] = stations_master['station_id'].astype(int).astype(str)
+        stations_master = stations_master[stations_master['station_id'].isin(stations)]
 
-    #########################################################
-    ### METRICS
-    #########################################################
+        stations_master = stations_master[['station_id', 'capacity']]
+        stations_data = stations_data[['station_id', 'num_bikes_available', 'num_docks_available', 'timestamp_file']]
 
-    stations_data_agg = stations_data.groupby('station_id').agg({
-        'num_bikes_available': 'mean',
-        'num_docks_available': 'mean'
-    }).reset_index()
-    stations_data_agg = stations_data_agg.rename(columns={
-        'num_bikes_available': 'average_bikes_available',
-        'num_docks_available': 'average_docks_available'
-    })
-    
-    #########################################################
-    ### AVAILABILITY METRICS
-    #########################################################
-    # Calculate percentage and percentile of time with 0 bikes available
-    zero_bikes_pct = stations_data.groupby('station_id').agg({
-        'num_bikes_available': lambda x: (x == 0).mean() 
-    }).reset_index()
-    zero_bikes_pct = zero_bikes_pct.rename(columns={
-        'num_bikes_available': 'pct_time_zero_bikes'
-    })
-    zero_bikes_pct['time_zero_bikes_percentile'] = zero_bikes_pct['pct_time_zero_bikes'].rank(pct=True, method='dense')
-    
-    # Calculate percentage and percentile of time with 0 docks available 
-    zero_docks_pct = stations_data.groupby('station_id').agg({
-        'num_docks_available': lambda x: (x == 0).mean() 
-    }).reset_index()
-    zero_docks_pct = zero_docks_pct.rename(columns={
-        'num_docks_available': 'pct_time_zero_docks'
-    })
-    zero_docks_pct['time_zero_docks_percentile'] = zero_docks_pct['pct_time_zero_docks'].rank(pct=True, method='dense')
-    
-    # Merge with main dataframe
-    stations_data_agg = pd.merge(stations_data_agg, zero_bikes_pct, on='station_id', how='inner')
-    stations_data_agg = pd.merge(stations_data_agg, zero_docks_pct, on='station_id', how='inner')
+        # Monitor memory before merge operations
+        get_memory_usage()
+        
+        stations_data = pd.merge(stations_data, stations_master, on='station_id', how='inner')
 
-    duration_segs = (pd.to_datetime(to_date) - pd.to_datetime(from_date)).total_seconds()
-    events = calculate_use_events(stations_data, duration_segs)
-    stations_data_agg = pd.merge(stations_data_agg, events, on='station_id', how='inner')
-    
-    # Convert DataFrame to dictionary with native Python types
-    return stations_data_agg.to_dict(orient='records')
+        #########################################################
+        ### METRICS
+        #########################################################
+
+        stations_data_agg = stations_data.groupby('station_id').agg({
+            'num_bikes_available': 'mean',
+            'num_docks_available': 'mean'
+        }).reset_index()
+        stations_data_agg = stations_data_agg.rename(columns={
+            'num_bikes_available': 'average_bikes_available',
+            'num_docks_available': 'average_docks_available'
+        })
+        
+        # Clear original stations_data if no longer needed
+        if 'stations_data' in locals():
+            del stations_data
+            force_garbage_collection()
+        
+        #########################################################
+        ### AVAILABILITY METRICS
+        #########################################################
+        # Calculate percentage and percentile of time with 0 bikes available
+        zero_bikes_pct = stations_data.groupby('station_id').agg({
+            'num_bikes_available': lambda x: (x == 0).mean() 
+        }).reset_index()
+        zero_bikes_pct = zero_bikes_pct.rename(columns={
+            'num_bikes_available': 'pct_time_zero_bikes'
+        })
+        zero_bikes_pct['time_zero_bikes_percentile'] = zero_bikes_pct['pct_time_zero_bikes'].rank(pct=True, method='dense')
+        
+        # Calculate percentage and percentile of time with 0 docks available 
+        zero_docks_pct = stations_data.groupby('station_id').agg({
+            'num_docks_available': lambda x: (x == 0).mean() 
+        }).reset_index()
+        zero_docks_pct = zero_docks_pct.rename(columns={
+            'num_docks_available': 'pct_time_zero_docks'
+        })
+        zero_docks_pct['time_zero_docks_percentile'] = zero_docks_pct['pct_time_zero_docks'].rank(pct=True, method='dense')
+        
+        # Merge with main dataframe
+        stations_data_agg = pd.merge(stations_data_agg, zero_bikes_pct, on='station_id', how='inner')
+        stations_data_agg = pd.merge(stations_data_agg, zero_docks_pct, on='station_id', how='inner')
+
+        duration_segs = (pd.to_datetime(to_date) - pd.to_datetime(from_date)).total_seconds()
+        events = calculate_use_events(stations_data, duration_segs)
+        stations_data_agg = pd.merge(stations_data_agg, events, on='station_id', how='inner')
+        
+        # Convert DataFrame to dictionary with native Python types
+        result = stations_data_agg.to_dict(orient='records')
+        
+        # Final cleanup
+        del stations_data_agg
+        force_garbage_collection()
+        
+        final_memory = get_memory_usage()
+        logger.info(f"Finished station_stats with {final_memory:.2f} MB memory usage")
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error in station_stats: {str(e)}")
+        raise
+    finally:
+        # Final garbage collection
+        force_garbage_collection()
 
 def station_stats_parquet(
         from_date: str,
