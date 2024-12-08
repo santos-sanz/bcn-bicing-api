@@ -6,6 +6,21 @@ from shapely.geometry import Point
 import requests
 from datetime import datetime, timedelta
 import pytz
+import boto3
+import io
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+# S3 client configuration
+s3_client = boto3.client(
+    's3',
+    aws_access_key_id=os.getenv('S3_ACCESS_KEY_ID', '407839b89c8906aad93ab435787f3711'),
+    aws_secret_access_key=os.getenv('S3_SECRET_ACCESS_KEY', 'b9f41352657f41435f528f2ccb4463879309d056d865dead1df7714683f223c8'),
+    endpoint_url=os.getenv('S3_ENDPOINT_URL', 'https://hqxxcdwfqitcwupxgcpr.supabase.co/storage/v1/s3'),
+    region_name=os.getenv('S3_REGION', 'eu-west-3')
+)
 
 def get_station_information():
     """
@@ -122,25 +137,17 @@ def get_timeframe(file_format='json'):
         
         # Special handling for single parquet file
         if file_format == 'parquet':
-            # In Railway, we know the app is running in /app directory
-            if os.getcwd() == '/app':
-                parquet_path = '/app/data/2023/data.parquet'
-            else:
-                parquet_path = 'data/2023/data.parquet'
-            
-            print(f"Current working directory: {os.getcwd()}")
-            print(f"Using Parquet file path: {parquet_path}")
-            print(f"File exists: {os.path.exists(parquet_path)}")
-            
-            if not os.path.exists(parquet_path):
-                raise FileNotFoundError(f"Parquet file not found at: {parquet_path}")
-            
             try:
-                print(f"Reading Parquet file from: {parquet_path}")
-                df = pd.read_parquet(parquet_path)
-                print("Successfully read Parquet file")
+                # Read parquet file from S3
+                response = s3_client.get_object(
+                    Bucket='bicingdata',
+                    Key='2023/data.parquet'
+                )
+                parquet_file = io.BytesIO(response['Body'].read())
+                df = pd.read_parquet(parquet_file)
+                print("Successfully read Parquet file from S3")
             except Exception as e:
-                print(f"Error reading Parquet file: {str(e)}")
+                print(f"Error reading Parquet file from S3: {str(e)}")
                 raise
             
             if 'timestamp' not in df.columns:
