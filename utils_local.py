@@ -120,50 +120,60 @@ def get_timeframe(file_format='json'):
     try:
         timezone = pytz.timezone('Etc/GMT-2')
         
-        # Get parquet file path from environment variable with fallback
-        parquet_path = os.getenv('PARQUET_FILE_PATH', 'data/2023/data.parquet')
-        
         # Special handling for single parquet file
         if file_format == 'parquet':
-            if not os.path.exists(parquet_path):
-                # Fallback to JSON if Parquet file is not found
-                print(f"Parquet file not found at {parquet_path}, falling back to JSON")
-                file_format = 'json'
+            # Try different possible paths for the parquet file
+            possible_paths = [
+                'data/2023/data.parquet',  # Default path
+                '/app/data/2023/data.parquet',  # Railway path
+                os.path.join(os.getcwd(), 'data/2023/data.parquet'),  # Absolute path
+                os.getenv('PARQUET_FILE_PATH', 'data/2023/data.parquet')  # Environment variable path
+            ]
+            
+            print(f"Current working directory: {os.getcwd()}")
+            print(f"Checking for Parquet file in the following locations:")
+            for path in possible_paths:
+                print(f"- {path} (exists: {os.path.exists(path)})")
+            
+            parquet_path = None
+            for path in possible_paths:
+                if os.path.exists(path):
+                    parquet_path = path
+                    print(f"Found Parquet file at: {os.path.abspath(path)}")
+                    break
+            
+            if parquet_path is None:
+                raise FileNotFoundError(f"Parquet file not found in any of the expected locations: {possible_paths}")
+            
+            print(f"Reading Parquet file from: {parquet_path}")
+            df = pd.read_parquet(parquet_path)
+            
+            if 'timestamp' not in df.columns:
+                print(f"Available columns: {df.columns.tolist()}")
+                raise ValueError("Timestamp column not found in Parquet file")
+            
+            print("Successfully read Parquet file")
+            min_timestamp = df['timestamp'].min()
+            max_timestamp = df['timestamp'].max()
+            print(f"Raw timestamps - min: {min_timestamp}, max: {max_timestamp}")
+            
+            if pd.api.types.is_numeric_dtype(df['timestamp']):
+                min_timestamp = datetime.utcfromtimestamp(min_timestamp).replace(tzinfo=pytz.UTC)
+                max_timestamp = datetime.utcfromtimestamp(max_timestamp).replace(tzinfo=pytz.UTC)
             else:
-                try:
-                    print(f"Reading Parquet file from: {parquet_path}")
-                    df = pd.read_parquet(parquet_path)
-                    
-                    if 'timestamp' not in df.columns:
-                        print(f"Available columns: {df.columns.tolist()}")
-                        raise ValueError("Timestamp column not found in Parquet file")
-                    
-                    print("Successfully read Parquet file")
-                    min_timestamp = df['timestamp'].min()
-                    max_timestamp = df['timestamp'].max()
-                    print(f"Raw timestamps - min: {min_timestamp}, max: {max_timestamp}")
-                    
-                    if pd.api.types.is_numeric_dtype(df['timestamp']):
-                        min_timestamp = datetime.utcfromtimestamp(min_timestamp).replace(tzinfo=pytz.UTC)
-                        max_timestamp = datetime.utcfromtimestamp(max_timestamp).replace(tzinfo=pytz.UTC)
-                    else:
-                        # Convert to UTC first, then to the target timezone
-                        min_timestamp = pd.to_datetime(min_timestamp).tz_localize('UTC')
-                        max_timestamp = pd.to_datetime(max_timestamp).tz_localize('UTC')
-                    
-                    # Convert from UTC to target timezone and subtract 4 hours
-                    min_timestamp = min_timestamp.astimezone(timezone) - timedelta(hours=4)
-                    max_timestamp = max_timestamp.astimezone(timezone) - timedelta(hours=4)
-                    
-                    result = (min_timestamp.strftime('%Y-%m-%d %H:%M:%S'), max_timestamp.strftime('%Y-%m-%d %H:%M:%S'))
-                    print(f"Final timestamps: {result}")
-                    return result
-                except Exception as e:
-                    print(f"Error reading Parquet file: {str(e)}")
-                    print("Falling back to JSON format")
-                    file_format = 'json'
+                # Convert to UTC first, then to the target timezone
+                min_timestamp = pd.to_datetime(min_timestamp).tz_localize('UTC')
+                max_timestamp = pd.to_datetime(max_timestamp).tz_localize('UTC')
+            
+            # Convert from UTC to target timezone and subtract 4 hours
+            min_timestamp = min_timestamp.astimezone(timezone) - timedelta(hours=4)
+            max_timestamp = max_timestamp.astimezone(timezone) - timedelta(hours=4)
+            
+            result = (min_timestamp.strftime('%Y-%m-%d %H:%M:%S'), max_timestamp.strftime('%Y-%m-%d %H:%M:%S'))
+            print(f"Final timestamps: {result}")
+            return result
         
-        # JSON processing (fallback)
+        # JSON processing
         main_folder = 'data/2023'
         if not os.path.exists(main_folder):
             raise FileNotFoundError(f"Main folder not found: {main_folder}")
@@ -189,7 +199,10 @@ def get_timeframe(file_format='json'):
         print(f"Error type: {type(e)}")
         import traceback
         print(f"Traceback: {traceback.format_exc()}")
-        raise ValueError(f"Error getting timeframe: {str(e)}")
+        if file_format == 'parquet':
+            raise ValueError(f"Error reading Parquet file: {str(e)}")
+        else:
+            raise ValueError(f"Error getting timeframe: {str(e)}")
 
 def get_timeframe_parquet():
     """
