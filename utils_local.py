@@ -34,9 +34,9 @@ load_dotenv()
 # S3 client configuration
 s3_client = boto3.client(
     's3',
-    aws_access_key_id=os.getenv('S3_ACCESS_KEY_ID', '407839b89c8906aad93ab435787f3711'),
-    aws_secret_access_key=os.getenv('S3_SECRET_ACCESS_KEY', 'b9f41352657f41435f528f2ccb4463879309d056d865dead1df7714683f223c8'),
-    endpoint_url=os.getenv('S3_ENDPOINT_URL', 'https://hqxxcdwfqitcwupxgcpr.supabase.co/storage/v1/s3'),
+    aws_access_key_id=os.getenv('S3_ACCESS_KEY_ID'),
+    aws_secret_access_key=os.getenv('S3_SECRET_ACCESS_KEY'),
+    endpoint_url=os.getenv('S3_ENDPOINT_URL'),
     region_name=os.getenv('S3_REGION', 'eu-west-3')
 )
 
