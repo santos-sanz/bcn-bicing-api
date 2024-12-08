@@ -117,15 +117,48 @@ def get_timeframe(file_format='json'):
     :param file_format: Data format ('json' for snapshots, 'parquet' for parcel)
     :return: First and last timestamp.
     """
-    timezone = pytz.timezone('Etc/GMT-2')
-    main_folder = 'data/2023'
-    
-    # Special handling for single parquet file
-    if file_format == 'parquet' and os.path.exists(os.path.join(main_folder, 'data.parquet')):
-        df = pd.read_parquet(os.path.join(main_folder, 'data.parquet'))
-        if 'timestamp' in df.columns:
+    try:
+        timezone = pytz.timezone('Etc/GMT-2')
+        main_folder = 'data/2023'
+        parquet_file = 'data.parquet'
+        
+        # Special handling for single parquet file
+        if file_format == 'parquet':
+            # Try different possible paths for the parquet file
+            possible_paths = [
+                os.path.join(main_folder, parquet_file),
+                parquet_file,
+                os.path.join('data', parquet_file),
+                'data/2023/data.parquet'  # Absolute path from workspace root
+            ]
+            
+            print(f"Current working directory: {os.getcwd()}")
+            print(f"Checking for Parquet file in the following locations:")
+            for path in possible_paths:
+                print(f"- {path} (exists: {os.path.exists(path)})")
+            
+            parquet_path = None
+            for path in possible_paths:
+                if os.path.exists(path):
+                    parquet_path = path
+                    print(f"Found Parquet file at: {os.path.abspath(path)}")
+                    break
+            
+            if parquet_path is None:
+                raise FileNotFoundError(f"Parquet file not found in any of the expected locations: {possible_paths}")
+            
+            print(f"Reading Parquet file from: {parquet_path}")
+            df = pd.read_parquet(parquet_path)
+            
+            if 'timestamp' not in df.columns:
+                print(f"Available columns: {df.columns.tolist()}")
+                raise ValueError("Timestamp column not found in Parquet file")
+            
+            print("Successfully read Parquet file")
             min_timestamp = df['timestamp'].min()
             max_timestamp = df['timestamp'].max()
+            print(f"Raw timestamps - min: {min_timestamp}, max: {max_timestamp}")
+            
             if pd.api.types.is_numeric_dtype(df['timestamp']):
                 min_timestamp = datetime.utcfromtimestamp(min_timestamp).replace(tzinfo=pytz.UTC)
                 max_timestamp = datetime.utcfromtimestamp(max_timestamp).replace(tzinfo=pytz.UTC)
@@ -138,30 +171,36 @@ def get_timeframe(file_format='json'):
             min_timestamp = min_timestamp.astimezone(timezone) - timedelta(hours=4)
             max_timestamp = max_timestamp.astimezone(timezone) - timedelta(hours=4)
             
-            return min_timestamp.strftime('%Y-%m-%d %H:%M:%S'), max_timestamp.strftime('%Y-%m-%d %H:%M:%S')
-        else:
-            raise ValueError("Timestamp column not found in Parquet file")
-    
-    # Original logic for timestamped files
-    dates = list_folders(main_folder)
-    files = list_all_files(main_folder, dates)
-    
-    # Filter files by format
-    if file_format == 'parquet':
-        files = [f for f in files if f.endswith('.parquet')]
-    else:
-        files = [f for f in files if f.endswith('.json')]
-    
-    if not files:
-        raise ValueError(f"No {file_format} files found in {main_folder}")
+            result = (min_timestamp.strftime('%Y-%m-%d %H:%M:%S'), max_timestamp.strftime('%Y-%m-%d %H:%M:%S'))
+            print(f"Final timestamps: {result}")
+            return result
         
-    timestamps = [int(x.split('/')[-1].split('.')[0]) for x in files]
-    min_timestamp = min(timestamps)
-    max_timestamp = max(timestamps)
-    min_timestamp = datetime.utcfromtimestamp(min_timestamp).replace(tzinfo=pytz.UTC).astimezone(timezone) - timedelta(hours=4)
-    max_timestamp = datetime.utcfromtimestamp(max_timestamp).replace(tzinfo=pytz.UTC).astimezone(timezone) - timedelta(hours=4)
+        # Original logic for timestamped files
+        if not os.path.exists(main_folder):
+            raise FileNotFoundError(f"Main folder not found: {main_folder}")
+            
+        dates = list_folders(main_folder)
+        files = list_all_files(main_folder, dates)
+        
+        # Filter files by format
+        files = [f for f in files if f.endswith(f'.{file_format}')]
+        
+        if not files:
+            raise ValueError(f"No {file_format} files found in {main_folder}")
+            
+        timestamps = [int(x.split('/')[-1].split('.')[0]) for x in files]
+        min_timestamp = min(timestamps)
+        max_timestamp = max(timestamps)
+        min_timestamp = datetime.utcfromtimestamp(min_timestamp).replace(tzinfo=pytz.UTC).astimezone(timezone) - timedelta(hours=4)
+        max_timestamp = datetime.utcfromtimestamp(max_timestamp).replace(tzinfo=pytz.UTC).astimezone(timezone) - timedelta(hours=4)
 
-    return min_timestamp.strftime('%Y-%m-%d %H:%M:%S'), max_timestamp.strftime('%Y-%m-%d %H:%M:%S')
+        return min_timestamp.strftime('%Y-%m-%d %H:%M:%S'), max_timestamp.strftime('%Y-%m-%d %H:%M:%S')
+    except Exception as e:
+        print(f"Error in get_timeframe: {str(e)}")
+        print(f"Error type: {type(e)}")
+        import traceback
+        print(f"Traceback: {traceback.format_exc()}")
+        raise ValueError(f"Error getting timeframe: {str(e)}")
 
 def get_timeframe_parquet():
     """
