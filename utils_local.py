@@ -9,6 +9,24 @@ import pytz
 import boto3
 import io
 from dotenv import load_dotenv
+import logging
+import sys
+from pythonjsonlogger import jsonlogger
+
+# Configure logging
+class CustomJsonFormatter(jsonlogger.JsonFormatter):
+    def add_fields(self, log_record, record, message_dict):
+        super(CustomJsonFormatter, self).add_fields(log_record, record, message_dict)
+        log_record['timestamp'] = datetime.utcnow().isoformat()
+        log_record['level'] = record.levelname
+        log_record['module'] = record.module
+
+logger = logging.getLogger(__name__)
+logHandler = logging.StreamHandler(sys.stdout)
+formatter = CustomJsonFormatter('%(timestamp)s %(level)s %(module)s %(message)s')
+logHandler.setFormatter(formatter)
+logger.addHandler(logHandler)
+logger.setLevel(logging.INFO)
 
 # Load environment variables
 load_dotenv()
@@ -138,59 +156,81 @@ def get_timeframe(file_format='json'):
         # Special handling for single parquet file
         if file_format == 'parquet':
             try:
-                print("Attempting to connect to S3...")
+                logger.info("Attempting to connect to S3...")
                 # Read parquet file from S3
                 try:
                     response = s3_client.get_object(
                         Bucket='bicingdata',
                         Key='2023/data.parquet'
                     )
-                    print("Successfully retrieved object from S3")
+                    logger.info("Successfully retrieved object from S3")
                 except Exception as s3_error:
-                    print(f"S3 connection error: {str(s3_error)}")
+                    logger.error(f"S3 connection error: {str(s3_error)}")
                     raise ValueError(f"Failed to connect to S3: {str(s3_error)}")
 
                 try:
-                    parquet_file = io.BytesIO(response['Body'].read())
-                    print("Successfully read response body")
+                    logger.info("Reading response body...")
+                    body_data = response['Body'].read()
+                    logger.info(f"Response body size: {len(body_data):,} bytes")
+                    parquet_file = io.BytesIO(body_data)
+                    logger.info("Successfully read response body")
                 except Exception as body_error:
-                    print(f"Error reading response body: {str(body_error)}")
+                    logger.error(f"Error reading response body: {str(body_error)}")
                     raise ValueError(f"Failed to read response body: {str(body_error)}")
 
                 try:
-                    df = pd.read_parquet(parquet_file)
-                    print("Successfully parsed Parquet file")
+                    logger.info("Starting Parquet parsing...")
+                    # Read only the timestamp column to reduce memory usage
+                    df = pd.read_parquet(parquet_file, columns=['timestamp'])
+                    logger.info(f"Successfully parsed Parquet file. DataFrame shape: {df.shape}")
                 except Exception as parquet_error:
-                    print(f"Error parsing Parquet file: {str(parquet_error)}")
+                    logger.error(f"Error parsing Parquet file: {str(parquet_error)}")
+                    logger.error(f"Error type: {type(parquet_error)}")
+                    import traceback
+                    logger.error(f"Full traceback: {traceback.format_exc()}")
                     raise ValueError(f"Failed to parse Parquet file: {str(parquet_error)}")
                 
             except Exception as e:
-                print(f"Error in S3 data retrieval process: {str(e)}")
+                logger.error(f"Error in S3 data retrieval process: {str(e)}")
                 raise ValueError(f"Failed to retrieve data from S3: {str(e)}")
             
             if 'timestamp' not in df.columns:
-                print(f"Available columns: {df.columns.tolist()}")
+                logger.error(f"Available columns: {df.columns.tolist()}")
                 raise ValueError("Timestamp column not found in Parquet file")
             
-            min_timestamp = df['timestamp'].min()
-            max_timestamp = df['timestamp'].max()
-            print(f"Raw timestamps - min: {min_timestamp}, max: {max_timestamp}")
-            
-            if pd.api.types.is_numeric_dtype(df['timestamp']):
-                min_timestamp = datetime.utcfromtimestamp(min_timestamp).replace(tzinfo=pytz.UTC)
-                max_timestamp = datetime.utcfromtimestamp(max_timestamp).replace(tzinfo=pytz.UTC)
-            else:
-                # Convert to UTC first, then to the target timezone
-                min_timestamp = pd.to_datetime(min_timestamp).tz_localize('UTC')
-                max_timestamp = pd.to_datetime(max_timestamp).tz_localize('UTC')
-            
-            # Convert from UTC to target timezone and subtract 4 hours
-            min_timestamp = min_timestamp.astimezone(timezone) - timedelta(hours=4)
-            max_timestamp = max_timestamp.astimezone(timezone) - timedelta(hours=4)
-            
-            result = (min_timestamp.strftime('%Y-%m-%d %H:%M:%S'), max_timestamp.strftime('%Y-%m-%d %H:%M:%S'))
-            print(f"Final timestamps: {result}")
-            return result
+            try:
+                logger.info("Calculating timestamps...")
+                min_timestamp = df['timestamp'].min()
+                max_timestamp = df['timestamp'].max()
+                logger.info(f"Raw timestamps - min: {min_timestamp}, max: {max_timestamp}")
+                
+                if pd.api.types.is_numeric_dtype(df['timestamp']):
+                    min_timestamp = datetime.utcfromtimestamp(min_timestamp).replace(tzinfo=pytz.UTC)
+                    max_timestamp = datetime.utcfromtimestamp(max_timestamp).replace(tzinfo=pytz.UTC)
+                else:
+                    # Convert to UTC first, then to the target timezone
+                    min_timestamp = pd.to_datetime(min_timestamp).tz_localize('UTC')
+                    max_timestamp = pd.to_datetime(max_timestamp).tz_localize('UTC')
+                
+                # Convert from UTC to target timezone and subtract 4 hours
+                min_timestamp = min_timestamp.astimezone(timezone) - timedelta(hours=4)
+                max_timestamp = max_timestamp.astimezone(timezone) - timedelta(hours=4)
+                
+                result = (min_timestamp.strftime('%Y-%m-%d %H:%M:%S'), max_timestamp.strftime('%Y-%m-%d %H:%M:%S'))
+                logger.info(f"Final timestamps: {result}")
+                return result
+            except Exception as ts_error:
+                logger.error(f"Error processing timestamps: {str(ts_error)}")
+                raise ValueError(f"Failed to process timestamps: {str(ts_error)}")
+                
+            finally:
+                # Clean up
+                if 'df' in locals():
+                    del df
+                if 'parquet_file' in locals():
+                    parquet_file.close()
+                if 'body_data' in locals():
+                    del body_data
         
         # JSON processing
         main_folder = 'data/2023'
@@ -214,10 +254,10 @@ def get_timeframe(file_format='json'):
 
         return min_timestamp.strftime('%Y-%m-%d %H:%M:%S'), max_timestamp.strftime('%Y-%m-%d %H:%M:%S')
     except Exception as e:
-        print(f"Error in get_timeframe: {str(e)}")
-        print(f"Error type: {type(e)}")
+        logger.error(f"Error in get_timeframe: {str(e)}")
+        logger.error(f"Error type: {type(e)}")
         import traceback
-        print(f"Traceback: {traceback.format_exc()}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         if file_format == 'parquet':
             raise ValueError(f"Error reading Parquet file: {str(e)}")
         else:
