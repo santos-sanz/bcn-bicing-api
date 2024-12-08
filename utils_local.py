@@ -138,17 +138,35 @@ def get_timeframe(file_format='json'):
         # Special handling for single parquet file
         if file_format == 'parquet':
             try:
+                print("Attempting to connect to S3...")
                 # Read parquet file from S3
-                response = s3_client.get_object(
-                    Bucket='bicingdata',
-                    Key='2023/data.parquet'
-                )
-                parquet_file = io.BytesIO(response['Body'].read())
-                df = pd.read_parquet(parquet_file)
-                print("Successfully read Parquet file from S3")
+                try:
+                    response = s3_client.get_object(
+                        Bucket='bicingdata',
+                        Key='2023/data.parquet'
+                    )
+                    print("Successfully retrieved object from S3")
+                except Exception as s3_error:
+                    print(f"S3 connection error: {str(s3_error)}")
+                    raise ValueError(f"Failed to connect to S3: {str(s3_error)}")
+
+                try:
+                    parquet_file = io.BytesIO(response['Body'].read())
+                    print("Successfully read response body")
+                except Exception as body_error:
+                    print(f"Error reading response body: {str(body_error)}")
+                    raise ValueError(f"Failed to read response body: {str(body_error)}")
+
+                try:
+                    df = pd.read_parquet(parquet_file)
+                    print("Successfully parsed Parquet file")
+                except Exception as parquet_error:
+                    print(f"Error parsing Parquet file: {str(parquet_error)}")
+                    raise ValueError(f"Failed to parse Parquet file: {str(parquet_error)}")
+                
             except Exception as e:
-                print(f"Error reading Parquet file from S3: {str(e)}")
-                raise
+                print(f"Error in S3 data retrieval process: {str(e)}")
+                raise ValueError(f"Failed to retrieve data from S3: {str(e)}")
             
             if 'timestamp' not in df.columns:
                 print(f"Available columns: {df.columns.tolist()}")
