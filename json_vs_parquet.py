@@ -2,7 +2,7 @@ import time
 from flow import flow
 import pandas as pd
 import os
-from utils_local import list_folders, list_all_files, filter_input_by_timeframe, json_to_dataframe
+from utils import list_folders, list_all_files, filter_input_by_timeframe, json_to_dataframe
 
 def compare_flow_performance(from_date, to_date, model, model_code, iterations=5):
     """

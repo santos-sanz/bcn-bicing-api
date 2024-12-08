@@ -1,4 +1,4 @@
-from utils_local import *
+from utils import *
 import os
 import io
 import logging
@@ -6,6 +6,8 @@ import pandas as pd
 from datetime import datetime, timedelta
 import psutil
 import gc
+import pytz
+import json  # Added to parse JSON strings
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -27,11 +29,29 @@ def force_garbage_collection():
 def process_stations_chunk(chunk, from_date_dt, to_date_dt):
     """Helper function to process a chunk of data"""
     try:
-        # Convert timestamp and filter by date range
+        # Convert timestamp and ensure UTC timezone
         chunk['timestamp'] = pd.to_datetime(chunk['timestamp'])
+        if chunk['timestamp'].dt.tz is None:
+            chunk['timestamp'] = chunk['timestamp'].dt.tz_localize('UTC')
+        
+        # Ensure from_date and to_date are timezone aware
+        if from_date_dt.tz is None:
+            from_date_dt = from_date_dt.tz_localize('UTC')
+        if to_date_dt.tz is None:
+            to_date_dt = to_date_dt.tz_localize('UTC')
+        
+        logger.info(f"Processing chunk with timestamps from {chunk['timestamp'].min()} to {chunk['timestamp'].max()}")
+        logger.info(f"Filtering for range: {from_date_dt} to {to_date_dt}")
+        logger.info(f"Chunk timestamp timezone: {chunk['timestamp'].dt.tz}")
+        logger.info(f"From date timezone: {from_date_dt.tz}")
+        logger.info(f"To date timezone: {to_date_dt.tz}")
+        
         date_mask = (chunk['timestamp'] >= from_date_dt) & \
                     (chunk['timestamp'] <= to_date_dt)
+        
+        logger.info(f"Records before filtering: {len(chunk)}")
         chunk = chunk[date_mask]
+        logger.info(f"Records after filtering: {len(chunk)}")
         
         if len(chunk) == 0:
             return []
@@ -40,7 +60,16 @@ def process_stations_chunk(chunk, from_date_dt, to_date_dt):
         all_stations = []
         for _, row in chunk.iterrows():
             try:
-                stations = row['data']['stations']
+                # Parse 'data' from JSON string to dict if needed
+                data = json.loads(row['data']) if isinstance(row['data'], str) else row['data']
+                
+                if 'stations' not in data:
+                    logger.warning(f"'stations' key missing in data: {data.keys()}")
+                    continue
+                
+                stations = data['stations']
+                logger.debug(f"Processing {len(stations)} stations from timestamp {row['timestamp']}")
+                
                 for station in stations:
                     station_record = {
                         'station_id': str(station.get('station_id', '')),
@@ -53,6 +82,7 @@ def process_stations_chunk(chunk, from_date_dt, to_date_dt):
                 logger.warning(f"Error processing row: {str(e)}")
                 continue
         
+        logger.info(f"Processed {len(all_stations)} station records")
         return all_stations
     except Exception as e:
         logger.error(f"Error in process_stations_chunk: {str(e)}")
@@ -66,77 +96,53 @@ def process_stations_chunk(chunk, from_date_dt, to_date_dt):
         if 'row' in locals():
             del row
 
-def station_stats(
-        from_date: str,
-        to_date: str,
-        model: str,
-        model_code: str,
-        file_format: str = 'json'
-):
+def get_station_stats(
+    from_date: str,
+    to_date: str,
+    model: str,
+    model_code: str
+) -> pd.DataFrame:
     """
-    This function returns station statistics for a given time period and model.
-    :param from_date: str: start date
-    :param to_date: str: end date
-    :param model: str: model type
-    :param model_code: str: model code
-    :param file_format: str: 'json' or 'parquet' (default: 'json')
+    Get station statistics for a given time period.
+    :param from_date: str: Start date in format 'YYYY-MM-DD HH:MM:SS'
+    :param to_date: str: End date in format 'YYYY-MM-DD HH:MM:SS'
+    :param model: str: Model type ('city', 'district', 'suburb')
+    :param model_code: str: Model code (empty for city, district code for district, suburb code for suburb)
+    :return: pd.DataFrame: Station statistics
     """
     
     initial_memory = get_memory_usage()
     logger.info(f"Starting station_stats with {initial_memory:.2f} MB memory usage")
+    logger.info(f"Processing request for period: {from_date} to {to_date}")
     
     if initial_memory > 400:  # 400MB threshold
         logger.warning("High initial memory usage detected")
         force_garbage_collection()
     
     try:
-        # model types: station_level, postcode_level, suburb_level, district_level, city_level
-        # model codes: station_id, postcode, suburb, district, city
-
+        # Convert date strings to datetime objects with UTC timezone
+        logger.info(f"Converting input dates to UTC: {from_date}, {to_date}")
+        from_date_dt = pd.to_datetime(from_date).tz_localize('UTC')
+        to_date_dt = pd.to_datetime(to_date).tz_localize('UTC')
+        
+        logger.info(f"Converted dates to UTC: {from_date_dt} to {to_date_dt}")
+        logger.info(f"From date timezone: {from_date_dt.tz}")
+        logger.info(f"To date timezone: {to_date_dt.tz}")
+        
         # Load data
         main_folder = 'analytics/snapshots'
         
-        # Handle Parquet file reading
-        if file_format == 'parquet':
-            try:
-                logger.info("Attempting to connect to S3...")
-                # Read parquet file from S3
+        try:
+            # Try to read local file first
+            parquet_file = 'data/2023/data.parquet'
+            if os.path.exists(parquet_file):
+                logger.info("Reading local Parquet file...")
                 try:
-                    response = s3_client.get_object(
-                        Bucket='bicingdata',
-                        Key='2023/data.parquet'
-                    )
-                    logger.info("Successfully retrieved object from S3")
-                except Exception as s3_error:
-                    logger.error(f"S3 connection error: {str(s3_error)}")
-                    raise ValueError(f"Failed to connect to S3: {str(s3_error)}")
-
-                try:
-                    logger.info("Reading response body...")
-                    body_data = response['Body'].read()
-                    body_size_mb = len(body_data) / 1024 / 1024
-                    logger.info(f"Response body size: {body_size_mb:.2f} MB")
+                    # Read a sample to check timestamps
+                    sample_df = pd.read_parquet(parquet_file, columns=['timestamp'])
+                    logger.info(f"Parquet file contains data from {sample_df.timestamp.min()} to {sample_df.timestamp.max()}")
+                    del sample_df
                     
-                    if body_size_mb > 300:  # If body data is larger than 300MB
-                        logger.warning("Large response body detected, may cause memory issues")
-                    
-                    parquet_file = io.BytesIO(body_data)
-                    logger.info("Successfully read response body")
-                    
-                    # Clear body_data from memory
-                    del body_data
-                    force_garbage_collection()
-                    
-                except Exception as body_error:
-                    logger.error(f"Error reading response body: {str(body_error)}")
-                    raise ValueError(f"Failed to read response body: {str(body_error)}")
-
-                # Convert date strings to datetime objects
-                from_date_dt = pd.to_datetime(from_date)
-                to_date_dt = pd.to_datetime(to_date)
-
-                try:
-                    logger.info("Starting Parquet parsing...")
                     # Process the file in chunks
                     all_stations = []
                     chunk_size = 100  # Reduced chunk size for memory constraints
@@ -146,6 +152,7 @@ def station_stats(
                     for chunk in pd.read_parquet(parquet_file, columns=['timestamp', 'data']):
                         chunk_stations = process_stations_chunk(chunk, from_date_dt, to_date_dt)
                         all_stations.extend(chunk_stations)
+                        logger.debug(f"Processed {len(chunk_stations)} stations from current chunk")
                         
                         processed_chunks += 1
                         if processed_chunks % 10 == 0:  # Log every 10 chunks
@@ -162,10 +169,11 @@ def station_stats(
                     logger.info(f"Successfully processed all chunks. Total records: {len(all_stations)}")
                     
                     if not all_stations:
+                        logger.error("No valid station data found after processing")
                         raise ValueError("No valid station data found after processing")
                     
-                    # Create DataFrame with only the needed columns
                     stations_data = pd.DataFrame(all_stations)
+                    logger.debug(f"Stations DataFrame created with {len(stations_data)} records")
                     
                     # Clear all_stations list from memory
                     del all_stations
@@ -177,25 +185,53 @@ def station_stats(
                     import traceback
                     logger.error(f"Full traceback: {traceback.format_exc()}")
                     raise ValueError(f"Failed to parse Parquet file: {str(parquet_error)}")
-                finally:
+            else:
+                # Fallback to S3 if local file doesn't exist
+                logger.info("Local file not found, attempting to connect to S3...")
+                try:
+                    response = s3_client.get_object(
+                        Bucket='bicingdata',
+                        Key='2023/data.parquet'
+                    )
+                    logger.info("Successfully retrieved object from S3")
+                    
+                    body_data = response['Body'].read()
+                    parquet_file = io.BytesIO(body_data)
+                    logger.info("Successfully read response body")
+                    
+                    # Process the file in chunks
+                    all_stations = []
+                    for chunk in pd.read_parquet(parquet_file, columns=['timestamp', 'data']):
+                        chunk_stations = process_stations_chunk(chunk, from_date_dt, to_date_dt)
+                        all_stations.extend(chunk_stations)
+                    
+                    if not all_stations:
+                        logger.error("No valid station data found after processing")
+                        raise ValueError("No valid station data found after processing")
+                    
+                    stations_data = pd.DataFrame(all_stations)
+                    
                     # Clean up
-                    if 'parquet_file' in locals():
-                        parquet_file.close()
+                    del body_data
+                    parquet_file.close()
                     force_garbage_collection()
-                
-            except Exception as e:
-                logger.error(f"Error in S3 data retrieval process: {str(e)}")
-                raise ValueError(f"Failed to retrieve data from S3: {str(e)}")
-        else:
-            # Original JSON processing
-            dates = list_folders(main_folder)
-            files = list_all_files(main_folder, dates)
-            files = [f for f in files if f.endswith('.json')]
-            files = filter_input_by_timeframe(files, from_date, to_date)
-            stations_data = json_to_dataframe(files)
-
+                    
+                except Exception as s3_error:
+                    logger.error(f"S3 connection error: {str(s3_error)}")
+                    raise ValueError(f"Failed to connect to S3: {str(s3_error)}")
+            
+        except Exception as e:
+            logger.error(f"Error in data retrieval process: {str(e)}")
+            raise ValueError(f"Failed to retrieve data: {str(e)}")
+        
         stations = get_stations(model, model_code)
+        logger.info(f"Stations to filter: {stations}")
         stations_data = stations_data[stations_data['station_id'].isin(stations)]
+        logger.info(f"Stations data after filtering: {len(stations_data)} records")
+        
+        if stations_data.empty:
+            logger.error("No stations data after filtering with provided station_code")
+            raise ValueError("No valid station data found after processing")
         
         stations_master = get_station_information()
         stations_master['station_id'] = stations_master['station_id'].astype(int).astype(str)
@@ -275,34 +311,19 @@ def station_stats(
         # Final garbage collection
         force_garbage_collection()
 
-def station_stats_parquet(
-        from_date: str,
-        to_date: str,
-        model: str,
-        model_code: str
-):
+def get_station_stats_by_timestamp(
+    timestamp: str,
+    model: str,
+    model_code: str,
+    file_format: str = 'parquet'
+) -> pd.DataFrame:
     """
-    Convenience function to get station statistics from Parquet files.
-    This is equivalent to calling station_stats with file_format='parquet'.
-    :param from_date: str: start date
-    :param to_date: str: end date
-    :param model: str: model type
-    :param model_code: str: model code
-    """
-    return station_stats(from_date, to_date, model, model_code, file_format='parquet')
-
-def get_snapshot_stats(
-        timestamp: str,
-        model: str,
-        model_code: str,
-        file_format: str = 'json'
-):
-    """
-    Get station statistics for a specific timestamp.
-    :param timestamp: str: target timestamp
-    :param model: str: model type
-    :param model_code: str: model code
-    :param file_format: str: 'json' or 'parquet' (default: 'json')
+    Get station statistics for a given timestamp.
+    :param timestamp: str: Timestamp in format 'YYYY-MM-DD HH:MM:SS'
+    :param model: str: Model type ('city', 'district', 'suburb')
+    :param model_code: str: Model code (empty for city, district code for district, suburb code for suburb)
+    :param file_format: str: 'parquet' format for data storage
+    :return: pd.DataFrame: Station statistics
     """
     main_folder = 'analytics/snapshots'
     single_parquet = 'data/2023/data.parquet'
@@ -357,20 +378,6 @@ def get_snapshot_stats(
     stations_data = stations_data[stations_data['station_id'].isin(stations)]
     
     return stations_data.to_dict(orient='records')
-
-def get_snapshot_stats_parquet(
-        timestamp: str,
-        model: str,
-        model_code: str
-):
-    """
-    Convenience function to get snapshot statistics from Parquet files.
-    This is equivalent to calling get_snapshot_stats with file_format='parquet'.
-    :param timestamp: str: target timestamp
-    :param model: str: model type
-    :param model_code: str: model code
-    """
-    return get_snapshot_stats(timestamp, model, model_code, file_format='parquet')
 
 def calculate_use_events(df, duration_segs):
     """

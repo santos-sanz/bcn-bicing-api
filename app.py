@@ -13,9 +13,9 @@ from contextlib import contextmanager
 import signal
 from functools import partial
 
-from flow import flow, flow_parquet
-from station_stats import station_stats, station_stats_parquet
-from utils_local import *
+from flow import flow_parquet
+from station_stats import get_station_stats as station_stats
+from utils import *
 import datetime
 
 # Load environment variables
@@ -33,7 +33,7 @@ app = FastAPI(
     ## Features
     * Get station statistics over time periods
     * Analyze bike flow (incoming/outgoing) at stations
-    * Support for both JSON and Parquet data formats
+    * Uses Parquet data format for efficient data processing
     * Configurable time aggregation for flow analysis
     """,
     version="1.0.0",
@@ -49,15 +49,8 @@ app = FastAPI(
 PORT = int(os.getenv('PORT', 8000))
 HOST = os.getenv('HOST', '0.0.0.0')
 ALLOWED_ORIGINS = os.getenv('ALLOWED_ORIGINS', '').split(',')
-DEFAULT_FORMAT = os.getenv('DEFAULT_FORMAT', 'parquet')
 DEFAULT_AGGREGATION_TIMEFRAME = os.getenv('DEFAULT_AGGREGATION_TIMEFRAME', '1h')
 MEMORY_LIMIT_MB = 400  # 400MB memory limit
-
-# Define valid file formats
-class FileFormat(str, Enum):
-    """Supported file formats for data retrieval"""
-    json = "json"
-    parquet = "parquet"
 
 class FlowOutput(str, Enum):
     """Valid flow output types"""
@@ -113,7 +106,7 @@ async def process_with_limits(func, *args, timeout_seconds=30, **kwargs):
                 future.cancel()
                 raise HTTPException(
                     status_code=504,
-                    detail="Request timed out. Try reducing the date range or using JSON format."
+                    detail="Request timed out. Try reducing the date range."
                 )
             except MemoryError as e:
                 future.cancel()
@@ -143,33 +136,23 @@ def read_root():
 @app.get("/timeframe",
     summary="Get Data Timeframe",
     description="Returns the earliest and latest timestamps available in the dataset",
-    response_description="Object containing from_date, to_date, and format used"
+    response_description="Object containing from_date and to_date"
 )
-async def get_timeframe_endpoint(format: FileFormat = FileFormat.parquet):
+async def get_timeframe_endpoint():
     """
     Retrieve the time range for which data is available.
     
-    Args:
-        format: Data format to use (json or parquet)
-    
     Returns:
-        dict: Contains from_date, to_date, and format used
+        dict: Contains from_date and to_date
     """
     try:
-        if format == FileFormat.parquet:
-            min_timestamp, max_timestamp = await process_with_limits(
-                get_timeframe_parquet,
-                timeout_seconds=10
-            )
-        else:
-            min_timestamp, max_timestamp = await process_with_limits(
-                get_timeframe,
-                timeout_seconds=10
-            )
+        min_timestamp, max_timestamp = await process_with_limits(
+            get_timeframe_parquet,
+            timeout_seconds=10
+        )
         return {
             "from_date": min_timestamp,
-            "to_date": max_timestamp,
-            "format": format
+            "to_date": max_timestamp
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -182,7 +165,6 @@ class StationStats(BaseModel):
     to_date: str = Field(..., description="End date in format 'YYYY-MM-DD HH:MM:SS'")
     model: str = Field(..., description="Station model type")
     station_code: str = Field(..., description="Specific station identifier")
-    format: FileFormat = Field(default=FileFormat.json, description="Data format (json or parquet)")
 
 @app.get("/stats",
     summary="Get Station Statistics",
@@ -193,8 +175,7 @@ async def get_stats_data(
     from_date: str = Query(..., description="Start date (YYYY-MM-DD HH:MM:SS)"),
     to_date: str = Query(..., description="End date (YYYY-MM-DD HH:MM:SS)"),
     model: str = Query(..., description="Station model type"),
-    station_code: str = Query(..., description="Station identifier"),
-    format: FileFormat = Query(FileFormat(DEFAULT_FORMAT))
+    station_code: str = Query(..., description="Station identifier")
 ):
     """
     Get statistical data for a specific station.
@@ -204,30 +185,19 @@ async def get_stats_data(
         to_date: End date for analysis
         model: Station model type
         station_code: Station identifier
-        format: Data format to use
     
     Returns:
         dict: Statistical data for the specified station
     """
     try:
-        if format == FileFormat.parquet:
-            response = await process_with_limits(
-                station_stats_parquet,
-                from_date=from_date,
-                to_date=to_date,
-                model=model,
-                model_code=station_code,
-                timeout_seconds=60  # Increased timeout for stats
-            )
-        else:
-            response = await process_with_limits(
-                station_stats,
-                from_date=from_date,
-                to_date=to_date,
-                model=model,
-                model_code=station_code,
-                timeout_seconds=60
-            )
+        response = await process_with_limits(
+            station_stats,
+            from_date=from_date,
+            to_date=to_date,
+            model=model,
+            model_code=station_code,
+            timeout_seconds=60  # Increased timeout for stats
+        )
         return response
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -247,7 +217,6 @@ class FlowRequest(BaseModel):
         default='1h',
         description="Time window for data aggregation (e.g., '1h', '30min')"
     )
-    format: FileFormat = Field(default=FileFormat.parquet, description="Data format (json or parquet)")
 
 @app.get("/flow",
     summary="Get Flow Statistics",
@@ -266,8 +235,7 @@ async def get_flow_data(
     aggregation_timeframe: str = Query(
         default=DEFAULT_AGGREGATION_TIMEFRAME,
         description="Time window for data aggregation (e.g., '1h', '30min')"
-    ),
-    format: FileFormat = Query(FileFormat(DEFAULT_FORMAT))
+    )
 ):
     """
     Get flow analysis data for a specific station.
@@ -279,7 +247,6 @@ async def get_flow_data(
         station_code: Station identifier
         output: Type of flow to analyze ('both', 'in', 'out')
         aggregation_timeframe: Time window for data aggregation
-        format: Data format to use
     
     Returns:
         dict: Flow analysis data for the specified station
@@ -303,28 +270,16 @@ async def get_flow_data(
         if output not in ['both', 'in', 'out']:
             raise ValueError("Invalid output parameter. Must be 'both', 'in', or 'out'")
 
-        if format == FileFormat.parquet:
-            response = await process_with_limits(
-                flow_parquet,
-                from_date=from_date,
-                to_date=to_date,
-                model=model,
-                model_code=station_code,
-                output=output,
-                aggregation_timeframe=aggregation_timeframe,
-                timeout_seconds=60  # Increased timeout for flow
-            )
-        else:
-            response = await process_with_limits(
-                flow,
-                from_date=from_date,
-                to_date=to_date,
-                model=model,
-                model_code=station_code,
-                output=output,
-                aggregation_timeframe=aggregation_timeframe,
-                timeout_seconds=60
-            )
+        response = await process_with_limits(
+            flow_parquet,
+            from_date=from_date,
+            to_date=to_date,
+            model=model,
+            model_code=station_code,
+            output=output,
+            aggregation_timeframe=aggregation_timeframe,
+            timeout_seconds=60  # Increased timeout for flow
+        )
         return response
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -340,8 +295,7 @@ async def get_flow_data(
 )
 def get_flow_data_now(
     model: str = Query(..., description="Station model type"),
-    station_code: str = Query(..., description="Station identifier"),
-    format: FileFormat = Query(default=FileFormat(DEFAULT_FORMAT))
+    station_code: str = Query(..., description="Station identifier")
 ):
     """
     Get flow analysis for the last 24 hours.
@@ -349,30 +303,19 @@ def get_flow_data_now(
     Args:
         model: Station model type
         station_code: Station identifier
-        format: Data format to use
     
     Returns:
         dict: Recent flow analysis data for the specified station
     """
     try:
-        if format == FileFormat.parquet:
-            response = flow_parquet(
-                from_date=(datetime.datetime.strptime(get_last_timestamp(), '%Y-%m-%d %H:%M:%S') - datetime.timedelta(days=1)).strftime('%Y-%m-%d %H:%M:%S'),
-                to_date=get_last_timestamp(),
-                model=model,
-                model_code=station_code,
-                output='both',
-                aggregation_timeframe='1h'
-            )
-        else:
-            response = flow(
-                from_date=(datetime.datetime.strptime(get_last_timestamp(), '%Y-%m-%d %H:%M:%S') - datetime.timedelta(days=1)).strftime('%Y-%m-%d %H:%M:%S'),
-                to_date=get_last_timestamp(),
-                model=model,
-                model_code=station_code,
-                output='both',
-                aggregation_timeframe='1h'
-            )
+        response = flow_parquet(
+            from_date=(datetime.datetime.strptime(get_last_timestamp(), '%Y-%m-%d %H:%M:%S') - datetime.timedelta(days=1)).strftime('%Y-%m-%d %H:%M:%S'),
+            to_date=get_last_timestamp(),
+            model=model,
+            model_code=station_code,
+            output='both',
+            aggregation_timeframe='1h'
+        )
         return response
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
