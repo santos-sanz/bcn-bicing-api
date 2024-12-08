@@ -1,10 +1,17 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Query, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional, Literal
 from enum import Enum
+from typing import Optional, List
+from pydantic import BaseModel, Field, ConfigDict
 import os
 from dotenv import load_dotenv
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+import psutil
+import logging
+from contextlib import contextmanager
+import signal
+from functools import partial
 
 from flow import flow, flow_parquet
 from station_stats import station_stats, station_stats_parquet
@@ -13,6 +20,9 @@ import datetime
 
 # Load environment variables
 load_dotenv()
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="BCN Bicing Analytics API",
@@ -41,6 +51,7 @@ HOST = os.getenv('HOST', '0.0.0.0')
 ALLOWED_ORIGINS = os.getenv('ALLOWED_ORIGINS', '').split(',')
 DEFAULT_FORMAT = os.getenv('DEFAULT_FORMAT', 'parquet')
 DEFAULT_AGGREGATION_TIMEFRAME = os.getenv('DEFAULT_AGGREGATION_TIMEFRAME', '1h')
+MEMORY_LIMIT_MB = 400  # 400MB memory limit
 
 # Define valid file formats
 class FileFormat(str, Enum):
@@ -56,6 +67,66 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@contextmanager
+def timeout(seconds):
+    def signal_handler(signum, frame):
+        raise TimeoutError("Processing timed out")
+    
+    # Set the signal handler and a timeout
+    signal.signal(signal.SIGALRM, signal_handler)
+    signal.alarm(seconds)
+    
+    try:
+        yield
+    finally:
+        # Disable the alarm
+        signal.alarm(0)
+
+def check_memory_usage():
+    """Check if memory usage is within limits"""
+    process = psutil.Process(os.getpid())
+    memory_mb = process.memory_info().rss / 1024 / 1024
+    if memory_mb > MEMORY_LIMIT_MB:
+        raise MemoryError(f"Memory usage ({memory_mb:.2f}MB) exceeds limit ({MEMORY_LIMIT_MB}MB)")
+    return memory_mb
+
+async def process_with_limits(func, *args, timeout_seconds=30, **kwargs):
+    """Execute function with memory and time limits"""
+    try:
+        # Run the function in a thread pool to allow timeout
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(func, *args, **kwargs)
+            try:
+                with timeout(timeout_seconds):
+                    result = await asyncio.get_event_loop().run_in_executor(
+                        None, 
+                        future.result
+                    )
+                    return result
+            except TimeoutError:
+                future.cancel()
+                raise HTTPException(
+                    status_code=504,
+                    detail="Request timed out. Try reducing the date range or using JSON format."
+                )
+            except MemoryError as e:
+                future.cancel()
+                raise HTTPException(
+                    status_code=503,
+                    detail=str(e)
+                )
+            except Exception as e:
+                future.cancel()
+                raise HTTPException(
+                    status_code=500,
+                    detail=str(e)
+                )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
+
 @app.get("/",
     summary="API Welcome Endpoint",
     description="Returns a welcome message for the BCN Bicing Analytics API"
@@ -68,7 +139,7 @@ def read_root():
     description="Returns the earliest and latest timestamps available in the dataset",
     response_description="Object containing from_date, to_date, and format used"
 )
-def get_timeframe_endpoint(format: FileFormat = FileFormat.parquet):
+async def get_timeframe_endpoint(format: FileFormat = FileFormat.parquet):
     """
     Retrieve the time range for which data is available.
     
@@ -80,9 +151,15 @@ def get_timeframe_endpoint(format: FileFormat = FileFormat.parquet):
     """
     try:
         if format == FileFormat.parquet:
-            min_timestamp, max_timestamp = get_timeframe_parquet()
+            min_timestamp, max_timestamp = await process_with_limits(
+                get_timeframe_parquet,
+                timeout_seconds=10
+            )
         else:
-            min_timestamp, max_timestamp = get_timeframe()
+            min_timestamp, max_timestamp = await process_with_limits(
+                get_timeframe,
+                timeout_seconds=10
+            )
         return {
             "from_date": min_timestamp,
             "to_date": max_timestamp,
@@ -106,7 +183,7 @@ class StationStats(BaseModel):
     description="Retrieve statistical data for a specific station over a time period",
     response_description="Statistical data for the requested station"
 )
-def get_stats_data(
+async def get_stats_data(
     from_date: str = Query(..., description="Start date (YYYY-MM-DD HH:MM:SS)"),
     to_date: str = Query(..., description="End date (YYYY-MM-DD HH:MM:SS)"),
     model: str = Query(..., description="Station model type"),
@@ -128,18 +205,22 @@ def get_stats_data(
     """
     try:
         if format == FileFormat.parquet:
-            response = station_stats_parquet(
+            response = await process_with_limits(
+                station_stats_parquet,
                 from_date=from_date,
                 to_date=to_date,
                 model=model,
-                model_code=station_code
+                model_code=station_code,
+                timeout_seconds=60  # Increased timeout for stats
             )
         else:
-            response = station_stats(
+            response = await process_with_limits(
+                station_stats,
                 from_date=from_date,
                 to_date=to_date,
                 model=model,
-                model_code=station_code
+                model_code=station_code,
+                timeout_seconds=60
             )
         return response
     except Exception as e:
@@ -170,7 +251,7 @@ class FlowRequest(BaseModel):
     """,
     response_description="Flow analysis data for the requested station"
 )
-def get_flow_data(
+async def get_flow_data(
     from_date: str = Query(..., description="Start date (YYYY-MM-DD HH:MM:SS)"),
     to_date: str = Query(..., description="End date (YYYY-MM-DD HH:MM:SS)"),
     model: str = Query(..., description="Station model type"),
@@ -214,22 +295,26 @@ def get_flow_data(
             raise ValueError("Invalid output parameter. Must be 'both', 'in', or 'out'")
 
         if format == FileFormat.parquet:
-            response = flow_parquet(
+            response = await process_with_limits(
+                flow_parquet,
                 from_date=from_date,
                 to_date=to_date,
                 model=model,
                 model_code=station_code,
                 output=output,
-                aggregation_timeframe=aggregation_timeframe
+                aggregation_timeframe=aggregation_timeframe,
+                timeout_seconds=60  # Increased timeout for flow
             )
         else:
-            response = flow(
+            response = await process_with_limits(
+                flow,
                 from_date=from_date,
                 to_date=to_date,
                 model=model,
                 model_code=station_code,
                 output=output,
-                aggregation_timeframe=aggregation_timeframe
+                aggregation_timeframe=aggregation_timeframe,
+                timeout_seconds=60
             )
         return response
     except ValueError as e:
