@@ -109,7 +109,7 @@ def get_timeframe(file_format='json'):
     :return: First and last timestamp.
     """
     timezone = pytz.timezone('Etc/GMT-2')
-    main_folder = 'analytics/snapshots'
+    main_folder = 'data/2023'
     dates = list_folders(main_folder)
     files = list_all_files(main_folder, dates)
     
@@ -239,7 +239,7 @@ def get_last_timestamp():
     :return: Last timestamp.
     """
     try:
-        main_folder = 'analytics/snapshots'
+        main_folder = 'data/2023'
         dates = list_folders(main_folder)
         files = list_all_files(main_folder, dates)
         return last_timestamp(files)
@@ -265,7 +265,7 @@ def get_dis_surb(lat, lon, geojson):
 
 # Source: https://github.com/martgnz/bcn-geodata/blob/master/districtes/districtes.geojson
 
-districts_geojson = 'analytics/snapshots/districtes.geojson'
+districts_geojson = 'data/2023/districtes.geojson'
 def add_districts(stations_master, geojson = districts_geojson):
     """
     Add the district that contains each station to the stations_master DataFrame.
@@ -277,7 +277,7 @@ def add_districts(stations_master, geojson = districts_geojson):
         lambda row: pd.Series(get_dis_surb(row['lat'], row['lon'], geojson)), axis=1)
     return stations_master
 
-suburb_geojson = 'analytics/snapshots/barris.geojson'
+suburb_geojson = 'data/2023/barris.geojson'
 def add_suburbs(stations_master, geojson = suburb_geojson):
     """
     Add the suburb that contains each station to the stations_master DataFrame.
