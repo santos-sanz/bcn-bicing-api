@@ -4,6 +4,8 @@ import pandas as pd
 import geopandas as gpd
 from shapely.geometry import Point
 import requests
+from datetime import datetime, timedelta
+import pytz
 
 def get_station_information():
     """
@@ -64,8 +66,15 @@ def filter_input_by_timeframe(files:list, from_date:str, to_date:str):
     """
     timezone = pytz.timezone('Etc/GMT-2')
     files_w_ts = {file:int(file.split('/')[-1].split('.')[0]) for file in files}
-    from_date = int(datetime.timestamp(datetime.strptime(correct_timestamp_format(from_date), '%Y-%m-%d %H:%M:%S').replace(tzinfo=pytz.utc).astimezone(timezone)))
-    to_date = int(datetime.timestamp(datetime.strptime(correct_timestamp_format(to_date), '%Y-%m-%d %H:%M:%S').replace(tzinfo=pytz.utc).astimezone(timezone)))
+    
+    # Convert dates to datetime objects and subtract 4 hours
+    from_date_dt = datetime.strptime(correct_timestamp_format(from_date), '%Y-%m-%d %H:%M:%S') - timedelta(hours=4)
+    to_date_dt = datetime.strptime(correct_timestamp_format(to_date), '%Y-%m-%d %H:%M:%S') - timedelta(hours=4)
+    
+    # Convert to timestamps
+    from_date = int(datetime.timestamp(from_date_dt.replace(tzinfo=pytz.utc).astimezone(timezone)))
+    to_date = int(datetime.timestamp(to_date_dt.replace(tzinfo=pytz.utc).astimezone(timezone)))
+    
     files_filtered = [file for file in files if from_date <= files_w_ts[file] <= to_date]
     return files_filtered
 
@@ -125,9 +134,9 @@ def get_timeframe(file_format='json'):
                 min_timestamp = pd.to_datetime(min_timestamp).tz_localize('UTC')
                 max_timestamp = pd.to_datetime(max_timestamp).tz_localize('UTC')
             
-            # Convert from UTC to target timezone
-            min_timestamp = min_timestamp.astimezone(timezone)
-            max_timestamp = max_timestamp.astimezone(timezone)
+            # Convert from UTC to target timezone and subtract 4 hours
+            min_timestamp = min_timestamp.astimezone(timezone) - timedelta(hours=4)
+            max_timestamp = max_timestamp.astimezone(timezone) - timedelta(hours=4)
             
             return min_timestamp.strftime('%Y-%m-%d %H:%M:%S'), max_timestamp.strftime('%Y-%m-%d %H:%M:%S')
         else:
@@ -149,8 +158,8 @@ def get_timeframe(file_format='json'):
     timestamps = [int(x.split('/')[-1].split('.')[0]) for x in files]
     min_timestamp = min(timestamps)
     max_timestamp = max(timestamps)
-    min_timestamp = datetime.utcfromtimestamp(min_timestamp).replace(tzinfo=pytz.UTC).astimezone(timezone)
-    max_timestamp = datetime.utcfromtimestamp(max_timestamp).replace(tzinfo=pytz.UTC).astimezone(timezone)
+    min_timestamp = datetime.utcfromtimestamp(min_timestamp).replace(tzinfo=pytz.UTC).astimezone(timezone) - timedelta(hours=4)
+    max_timestamp = datetime.utcfromtimestamp(max_timestamp).replace(tzinfo=pytz.UTC).astimezone(timezone) - timedelta(hours=4)
 
     return min_timestamp.strftime('%Y-%m-%d %H:%M:%S'), max_timestamp.strftime('%Y-%m-%d %H:%M:%S')
 

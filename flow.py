@@ -66,8 +66,13 @@ def flow(
                 # Convert timestamp and filter by date range
                 # print("Debug: Converting and filtering timestamps...")
                 raw_data['timestamp'] = pd.to_datetime(raw_data['timestamp'])
-                date_mask = (raw_data['timestamp'] >= pd.to_datetime(adjusted_from_date)) & \
-                           (raw_data['timestamp'] <= pd.to_datetime(to_date))
+
+                # Adjust dates by subtracting 4 hours
+                from_date_dt = pd.to_datetime(from_date) - pd.Timedelta(hours=4)
+                to_date_dt = pd.to_datetime(to_date) - pd.Timedelta(hours=4)
+
+                date_mask = (raw_data['timestamp'] >= from_date_dt) & \
+                           (raw_data['timestamp'] <= to_date_dt)
                 raw_data = raw_data[date_mask].copy()
                 # print(f"Debug: Filtered data shape: {raw_data.shape}")
                 
