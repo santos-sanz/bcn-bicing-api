@@ -1,12 +1,11 @@
 from utils_local import *
 import os
 import io
-import boto3
 import logging
 import pandas as pd
 
-# Initialize S3 client
-s3_client = boto3.client('s3')
+# Configure logging
+logger = logging.getLogger(__name__)
 
 def station_stats(
         from_date: str,
@@ -33,14 +32,38 @@ def station_stats(
     # Handle Parquet file reading
     if file_format == 'parquet':
         try:
+            logger.info("Attempting to connect to S3...")
             # Read parquet file from S3
-            response = s3_client.get_object(
-                Bucket='bicingdata',
-                Key='2023/data.parquet'
-            )
-            body_data = response['Body'].read()
-            parquet_file = io.BytesIO(body_data)
-            raw_data = pd.read_parquet(parquet_file)
+            try:
+                response = s3_client.get_object(
+                    Bucket='bicingdata',
+                    Key='2023/data.parquet'
+                )
+                logger.info("Successfully retrieved object from S3")
+            except Exception as s3_error:
+                logger.error(f"S3 connection error: {str(s3_error)}")
+                raise ValueError(f"Failed to connect to S3: {str(s3_error)}")
+
+            try:
+                logger.info("Reading response body...")
+                body_data = response['Body'].read()
+                logger.info(f"Response body size: {len(body_data):,} bytes")
+                parquet_file = io.BytesIO(body_data)
+                logger.info("Successfully read response body")
+            except Exception as body_error:
+                logger.error(f"Error reading response body: {str(body_error)}")
+                raise ValueError(f"Failed to read response body: {str(body_error)}")
+
+            try:
+                logger.info("Starting Parquet parsing...")
+                raw_data = pd.read_parquet(parquet_file)
+                logger.info(f"Successfully parsed Parquet file. DataFrame shape: {raw_data.shape}")
+            except Exception as parquet_error:
+                logger.error(f"Error parsing Parquet file: {str(parquet_error)}")
+                logger.error(f"Error type: {type(parquet_error)}")
+                import traceback
+                logger.error(f"Full traceback: {traceback.format_exc()}")
+                raise ValueError(f"Failed to parse Parquet file: {str(parquet_error)}")
             
             # Convert timestamp and filter by date range
             raw_data['timestamp'] = pd.to_datetime(raw_data['timestamp'])
@@ -74,6 +97,7 @@ def station_stats(
             stations_data = pd.DataFrame(all_stations)
             
         except Exception as e:
+            logger.error(f"Error in S3 data retrieval process: {str(e)}")
             raise ValueError(f"Failed to retrieve data from S3: {str(e)}")
     else:
         # Original JSON processing

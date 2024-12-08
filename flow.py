@@ -4,14 +4,10 @@ import os
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 import io
-import boto3
 import logging
 
 # Configure logging
 logger = logging.getLogger(__name__)
-
-# Initialize S3 client
-s3_client = boto3.client('s3')
 
 def flow(
         from_date: str,
