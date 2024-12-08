@@ -9,6 +9,35 @@ import logging
 # Configure logging
 logger = logging.getLogger(__name__)
 
+def process_stations_chunk(chunk, from_date_dt, to_date_dt):
+    """Helper function to process a chunk of data"""
+    # Convert timestamp and filter by date range
+    chunk['timestamp'] = pd.to_datetime(chunk['timestamp'])
+    date_mask = (chunk['timestamp'] >= from_date_dt) & \
+                (chunk['timestamp'] <= to_date_dt)
+    chunk = chunk[date_mask]
+    
+    if len(chunk) == 0:
+        return []
+
+    # Process each row and extract station data
+    all_stations = []
+    for _, row in chunk.iterrows():
+        try:
+            stations = row['data']['stations']
+            for station in stations:
+                station_record = {
+                    'station_id': str(station.get('station_id', '')),
+                    'num_bikes_available': station.get('num_bikes_available', 0),
+                    'timestamp_file': row['timestamp']
+                }
+                all_stations.append(station_record)
+        except Exception as e:
+            logger.warning(f"Error processing row: {str(e)}")
+            continue
+    
+    return all_stations
+
 def flow(
         from_date: str,
         to_date: str,
@@ -83,53 +112,45 @@ def flow(
                 logger.error(f"Error reading response body: {str(body_error)}")
                 raise ValueError(f"Failed to read response body: {str(body_error)}")
 
+            # Convert date strings to datetime objects and adjust for 4-hour offset
+            from_date_dt = pd.to_datetime(from_date) - pd.Timedelta(hours=4)
+            to_date_dt = pd.to_datetime(to_date) - pd.Timedelta(hours=4)
+
             try:
                 logger.info("Starting Parquet parsing...")
-                raw_data = pd.read_parquet(parquet_file)
-                logger.info(f"Successfully parsed Parquet file. DataFrame shape: {raw_data.shape}")
+                # Process the file in chunks
+                all_stations = []
+                chunk_size = 1000  # Adjust this value based on your memory constraints
+                
+                # Only read the columns we need
+                for chunk in pd.read_parquet(parquet_file, columns=['timestamp', 'data']):
+                    chunk_stations = process_stations_chunk(chunk, from_date_dt, to_date_dt)
+                    all_stations.extend(chunk_stations)
+                    
+                    # Free up memory
+                    del chunk
+                    
+                logger.info(f"Successfully processed all chunks. Total records: {len(all_stations)}")
+                
+                if not all_stations:
+                    raise ValueError("No valid station data found after processing")
+                
+                # Create DataFrame with only the needed columns
+                stations_data = pd.DataFrame(all_stations)
+                stations_data = stations_data[['timestamp_file', 'station_id', 'num_bikes_available']]
+                
             except Exception as parquet_error:
                 logger.error(f"Error parsing Parquet file: {str(parquet_error)}")
                 logger.error(f"Error type: {type(parquet_error)}")
                 import traceback
                 logger.error(f"Full traceback: {traceback.format_exc()}")
                 raise ValueError(f"Failed to parse Parquet file: {str(parquet_error)}")
-            
-            # Convert timestamp and filter by date range
-            raw_data['timestamp'] = pd.to_datetime(raw_data['timestamp'])
-
-            # Adjust dates by subtracting 4 hours
-            from_date_dt = pd.to_datetime(from_date) - pd.Timedelta(hours=4)
-            to_date_dt = pd.to_datetime(to_date) - pd.Timedelta(hours=4)
-
-            date_mask = (raw_data['timestamp'] >= from_date_dt) & \
-                       (raw_data['timestamp'] <= to_date_dt)
-            raw_data = raw_data[date_mask].copy()
-            
-            if len(raw_data) == 0:
-                raise ValueError(f"No data found in Parquet file for date range {from_date} to {to_date}")
-
-            # Process each row and extract station data
-            all_stations = []
-            for _, row in raw_data.iterrows():
-                try:
-                    stations = row['data']['stations']
-                    for station in stations:
-                        station_record = {
-                            'station_id': str(station.get('station_id', '')),
-                            'num_bikes_available': station.get('num_bikes_available', 0),
-                            'timestamp_file': row['timestamp']
-                        }
-                        all_stations.append(station_record)
-                except Exception as e:
-                    logger.warning(f"Error processing row: {str(e)}")
-                    continue
-            
-            if not all_stations:
-                raise ValueError("No valid station data found after processing")
-            
-            # Create DataFrame with only the needed columns
-            stations_data = pd.DataFrame(all_stations)
-            stations_data = stations_data[['timestamp_file', 'station_id', 'num_bikes_available']]
+            finally:
+                # Clean up
+                if 'parquet_file' in locals():
+                    parquet_file.close()
+                if 'body_data' in locals():
+                    del body_data
             
         except Exception as e:
             logger.error(f"Error in S3 data retrieval process: {str(e)}")

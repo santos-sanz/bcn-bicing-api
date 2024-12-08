@@ -3,9 +3,40 @@ import os
 import io
 import logging
 import pandas as pd
+from datetime import datetime, timedelta
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+def process_stations_chunk(chunk, from_date_dt, to_date_dt):
+    """Helper function to process a chunk of data"""
+    # Convert timestamp and filter by date range
+    chunk['timestamp'] = pd.to_datetime(chunk['timestamp'])
+    date_mask = (chunk['timestamp'] >= from_date_dt) & \
+                (chunk['timestamp'] <= to_date_dt)
+    chunk = chunk[date_mask]
+    
+    if len(chunk) == 0:
+        return []
+
+    # Process each row and extract station data
+    all_stations = []
+    for _, row in chunk.iterrows():
+        try:
+            stations = row['data']['stations']
+            for station in stations:
+                station_record = {
+                    'station_id': str(station.get('station_id', '')),
+                    'num_bikes_available': station.get('num_bikes_available', 0),
+                    'num_docks_available': station.get('num_docks_available', 0),
+                    'timestamp_file': row['timestamp']
+                }
+                all_stations.append(station_record)
+        except Exception as e:
+            logger.warning(f"Error processing row: {str(e)}")
+            continue
+    
+    return all_stations
 
 def station_stats(
         from_date: str,
@@ -54,47 +85,44 @@ def station_stats(
                 logger.error(f"Error reading response body: {str(body_error)}")
                 raise ValueError(f"Failed to read response body: {str(body_error)}")
 
+            # Convert date strings to datetime objects
+            from_date_dt = pd.to_datetime(from_date)
+            to_date_dt = pd.to_datetime(to_date)
+
             try:
                 logger.info("Starting Parquet parsing...")
-                raw_data = pd.read_parquet(parquet_file)
-                logger.info(f"Successfully parsed Parquet file. DataFrame shape: {raw_data.shape}")
+                # Process the file in chunks
+                all_stations = []
+                chunk_size = 1000  # Adjust this value based on your memory constraints
+                
+                # Only read the columns we need
+                for chunk in pd.read_parquet(parquet_file, columns=['timestamp', 'data']):
+                    chunk_stations = process_stations_chunk(chunk, from_date_dt, to_date_dt)
+                    all_stations.extend(chunk_stations)
+                    
+                    # Free up memory
+                    del chunk
+                    
+                logger.info(f"Successfully processed all chunks. Total records: {len(all_stations)}")
+                
+                if not all_stations:
+                    raise ValueError("No valid station data found after processing")
+                
+                # Create DataFrame with only the needed columns
+                stations_data = pd.DataFrame(all_stations)
+                
             except Exception as parquet_error:
                 logger.error(f"Error parsing Parquet file: {str(parquet_error)}")
                 logger.error(f"Error type: {type(parquet_error)}")
                 import traceback
                 logger.error(f"Full traceback: {traceback.format_exc()}")
                 raise ValueError(f"Failed to parse Parquet file: {str(parquet_error)}")
-            
-            # Convert timestamp and filter by date range
-            raw_data['timestamp'] = pd.to_datetime(raw_data['timestamp'])
-            date_mask = (raw_data['timestamp'] >= pd.to_datetime(from_date)) & \
-                       (raw_data['timestamp'] <= pd.to_datetime(to_date))
-            raw_data = raw_data[date_mask].copy()
-            
-            if len(raw_data) == 0:
-                raise ValueError(f"No data found in Parquet file for date range {from_date} to {to_date}")
-
-            # Process each row and extract station data
-            all_stations = []
-            for _, row in raw_data.iterrows():
-                try:
-                    stations = row['data']['stations']
-                    for station in stations:
-                        station_record = {
-                            'station_id': str(station.get('station_id', '')),
-                            'num_bikes_available': station.get('num_bikes_available', 0),
-                            'num_docks_available': station.get('num_docks_available', 0),
-                            'timestamp_file': row['timestamp']
-                        }
-                        all_stations.append(station_record)
-                except Exception as e:
-                    continue
-            
-            if not all_stations:
-                raise ValueError("No valid station data found after processing")
-            
-            # Create DataFrame with only the needed columns
-            stations_data = pd.DataFrame(all_stations)
+            finally:
+                # Clean up
+                if 'parquet_file' in locals():
+                    parquet_file.close()
+                if 'body_data' in locals():
+                    del body_data
             
         except Exception as e:
             logger.error(f"Error in S3 data retrieval process: {str(e)}")
@@ -107,12 +135,10 @@ def station_stats(
         files = filter_input_by_timeframe(files, from_date, to_date)
         stations_data = json_to_dataframe(files)
 
-    duration_segs = (pd.to_datetime(to_date) - pd.to_datetime(from_date)).total_seconds()
-    
-    stations_master = get_station_information()
-
     stations = get_stations(model, model_code)
     stations_data = stations_data[stations_data['station_id'].isin(stations)]
+    
+    stations_master = get_station_information()
     stations_master['station_id'] = stations_master['station_id'].astype(int).astype(str)
     stations_master = stations_master[stations_master['station_id'].isin(stations)]
 
@@ -159,6 +185,7 @@ def station_stats(
     stations_data_agg = pd.merge(stations_data_agg, zero_bikes_pct, on='station_id', how='inner')
     stations_data_agg = pd.merge(stations_data_agg, zero_docks_pct, on='station_id', how='inner')
 
+    duration_segs = (pd.to_datetime(to_date) - pd.to_datetime(from_date)).total_seconds()
     events = calculate_use_events(stations_data, duration_segs)
     stations_data_agg = pd.merge(stations_data_agg, events, on='station_id', how='inner')
     
