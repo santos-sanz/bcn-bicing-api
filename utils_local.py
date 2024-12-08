@@ -118,11 +118,17 @@ def get_timeframe(file_format='json'):
             min_timestamp = df['timestamp'].min()
             max_timestamp = df['timestamp'].max()
             if pd.api.types.is_numeric_dtype(df['timestamp']):
-                min_timestamp = datetime.utcfromtimestamp(min_timestamp).astimezone(timezone)
-                max_timestamp = datetime.utcfromtimestamp(max_timestamp).astimezone(timezone)
+                min_timestamp = datetime.utcfromtimestamp(min_timestamp).replace(tzinfo=pytz.UTC)
+                max_timestamp = datetime.utcfromtimestamp(max_timestamp).replace(tzinfo=pytz.UTC)
             else:
-                min_timestamp = pd.to_datetime(min_timestamp).astimezone(timezone)
-                max_timestamp = pd.to_datetime(max_timestamp).astimezone(timezone)
+                # Convert to UTC first, then to the target timezone
+                min_timestamp = pd.to_datetime(min_timestamp).tz_localize('UTC')
+                max_timestamp = pd.to_datetime(max_timestamp).tz_localize('UTC')
+            
+            # Convert from UTC to target timezone
+            min_timestamp = min_timestamp.astimezone(timezone)
+            max_timestamp = max_timestamp.astimezone(timezone)
+            
             return min_timestamp.strftime('%Y-%m-%d %H:%M:%S'), max_timestamp.strftime('%Y-%m-%d %H:%M:%S')
         else:
             raise ValueError("Timestamp column not found in Parquet file")
@@ -143,10 +149,10 @@ def get_timeframe(file_format='json'):
     timestamps = [int(x.split('/')[-1].split('.')[0]) for x in files]
     min_timestamp = min(timestamps)
     max_timestamp = max(timestamps)
-    min_timestamp = datetime.utcfromtimestamp(min_timestamp).astimezone(timezone).strftime('%Y-%m-%d %H:%M:%S')
-    max_timestamp = datetime.utcfromtimestamp(max_timestamp).astimezone(timezone).strftime('%Y-%m-%d %H:%M:%S')
+    min_timestamp = datetime.utcfromtimestamp(min_timestamp).replace(tzinfo=pytz.UTC).astimezone(timezone)
+    max_timestamp = datetime.utcfromtimestamp(max_timestamp).replace(tzinfo=pytz.UTC).astimezone(timezone)
 
-    return min_timestamp, max_timestamp
+    return min_timestamp.strftime('%Y-%m-%d %H:%M:%S'), max_timestamp.strftime('%Y-%m-%d %H:%M:%S')
 
 def get_timeframe_parquet():
     """
