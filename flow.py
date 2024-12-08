@@ -3,7 +3,15 @@ import pytz
 import os
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
+import io
+import boto3
+import logging
 
+# Configure logging
+logger = logging.getLogger(__name__)
+
+# Initialize S3 client
+s3_client = boto3.client('s3')
 
 def flow(
         from_date: str,
@@ -51,65 +59,85 @@ def flow(
     # model types: station_level, postcode_level, suburb_level, district_level, city_level
     # model codes: station_id, postcode, suburb, district, city
 
-    # Load data: To change in cloud environment
+    # Load data
     main_folder = 'analytics/snapshots'
-    single_parquet = 'data/2023/data.parquet'
     
     # Handle Parquet file reading
     if file_format == 'parquet':
-        if os.path.exists(single_parquet):
+        try:
+            logger.info("Attempting to connect to S3...")
+            # Read parquet file from S3
             try:
-                # print("Debug: Reading Parquet file...")
-                raw_data = pd.read_parquet(single_parquet)
-                # print(f"Debug: Raw data shape: {raw_data.shape}")
-                
-                # Convert timestamp and filter by date range
-                # print("Debug: Converting and filtering timestamps...")
-                raw_data['timestamp'] = pd.to_datetime(raw_data['timestamp'])
+                response = s3_client.get_object(
+                    Bucket='bicingdata',
+                    Key='2023/data.parquet'
+                )
+                logger.info("Successfully retrieved object from S3")
+            except Exception as s3_error:
+                logger.error(f"S3 connection error: {str(s3_error)}")
+                raise ValueError(f"Failed to connect to S3: {str(s3_error)}")
 
-                # Adjust dates by subtracting 4 hours
-                from_date_dt = pd.to_datetime(from_date) - pd.Timedelta(hours=4)
-                to_date_dt = pd.to_datetime(to_date) - pd.Timedelta(hours=4)
+            try:
+                logger.info("Reading response body...")
+                body_data = response['Body'].read()
+                logger.info(f"Response body size: {len(body_data):,} bytes")
+                parquet_file = io.BytesIO(body_data)
+                logger.info("Successfully read response body")
+            except Exception as body_error:
+                logger.error(f"Error reading response body: {str(body_error)}")
+                raise ValueError(f"Failed to read response body: {str(body_error)}")
 
-                date_mask = (raw_data['timestamp'] >= from_date_dt) & \
-                           (raw_data['timestamp'] <= to_date_dt)
-                raw_data = raw_data[date_mask].copy()
-                # print(f"Debug: Filtered data shape: {raw_data.shape}")
-                
-                if len(raw_data) == 0:
-                    raise ValueError(f"No data found in Parquet file for date range {from_date} to {to_date}")
-                
-                # Process each row and extract station data
-                # print("Debug: Processing station data...")
-                all_stations = []
-                for _, row in raw_data.iterrows():
-                    try:
-                        stations = row['data']['stations']
-                        for station in stations:
-                            # Create a new record with the required fields
-                            station_record = {
-                                'station_id': str(station.get('station_id', '')),
-                                'num_bikes_available': station.get('num_bikes_available', 0),
-                                'timestamp_file': row['timestamp']
-                            }
-                            all_stations.append(station_record)
-                    except Exception as e:
-                        # print(f"Warning: Error processing row: {str(e)}")
-                        continue
-                
-                if not all_stations:
-                    raise ValueError("No valid station data found after processing")
-                
-                # Create DataFrame with only the needed columns
-                stations_data = pd.DataFrame(all_stations)
-                stations_data = stations_data[['timestamp_file', 'station_id', 'num_bikes_available']]
-                # print(f"Debug: Final DataFrame shape: {stations_data.shape}")
-                
-            except Exception as e:
-                # print(f"Debug: Exception occurred: {str(e)}")
-                raise ValueError(f"Error reading Parquet file: {str(e)}")
-        else:
-            raise ValueError(f"Parquet file not found at {single_parquet}")
+            try:
+                logger.info("Starting Parquet parsing...")
+                raw_data = pd.read_parquet(parquet_file)
+                logger.info(f"Successfully parsed Parquet file. DataFrame shape: {raw_data.shape}")
+            except Exception as parquet_error:
+                logger.error(f"Error parsing Parquet file: {str(parquet_error)}")
+                logger.error(f"Error type: {type(parquet_error)}")
+                import traceback
+                logger.error(f"Full traceback: {traceback.format_exc()}")
+                raise ValueError(f"Failed to parse Parquet file: {str(parquet_error)}")
+            
+            # Convert timestamp and filter by date range
+            raw_data['timestamp'] = pd.to_datetime(raw_data['timestamp'])
+
+            # Adjust dates by subtracting 4 hours
+            from_date_dt = pd.to_datetime(from_date) - pd.Timedelta(hours=4)
+            to_date_dt = pd.to_datetime(to_date) - pd.Timedelta(hours=4)
+
+            date_mask = (raw_data['timestamp'] >= from_date_dt) & \
+                       (raw_data['timestamp'] <= to_date_dt)
+            raw_data = raw_data[date_mask].copy()
+            
+            if len(raw_data) == 0:
+                raise ValueError(f"No data found in Parquet file for date range {from_date} to {to_date}")
+
+            # Process each row and extract station data
+            all_stations = []
+            for _, row in raw_data.iterrows():
+                try:
+                    stations = row['data']['stations']
+                    for station in stations:
+                        station_record = {
+                            'station_id': str(station.get('station_id', '')),
+                            'num_bikes_available': station.get('num_bikes_available', 0),
+                            'timestamp_file': row['timestamp']
+                        }
+                        all_stations.append(station_record)
+                except Exception as e:
+                    logger.warning(f"Error processing row: {str(e)}")
+                    continue
+            
+            if not all_stations:
+                raise ValueError("No valid station data found after processing")
+            
+            # Create DataFrame with only the needed columns
+            stations_data = pd.DataFrame(all_stations)
+            stations_data = stations_data[['timestamp_file', 'station_id', 'num_bikes_available']]
+            
+        except Exception as e:
+            logger.error(f"Error in S3 data retrieval process: {str(e)}")
+            raise ValueError(f"Failed to retrieve data from S3: {str(e)}")
     else:
         # Original JSON processing
         dates = list_folders(main_folder)

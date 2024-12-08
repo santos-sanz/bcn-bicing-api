@@ -1,5 +1,12 @@
 from utils_local import *
 import os
+import io
+import boto3
+import logging
+import pandas as pd
+
+# Initialize S3 client
+s3_client = boto3.client('s3')
 
 def station_stats(
         from_date: str,
@@ -20,51 +27,54 @@ def station_stats(
     # model types: station_level, postcode_level, suburb_level, district_level, city_level
     # model codes: station_id, postcode, suburb, district, city
 
-    # Load data: To change in cloud environment
+    # Load data
     main_folder = 'analytics/snapshots'
-    single_parquet = 'data/2023/data.parquet'
     
     # Handle Parquet file reading
     if file_format == 'parquet':
-        if os.path.exists(single_parquet):
-            try:
-                raw_data = pd.read_parquet(single_parquet)
-                
-                # Convert timestamp and filter by date range
-                raw_data['timestamp'] = pd.to_datetime(raw_data['timestamp'])
-                date_mask = (raw_data['timestamp'] >= pd.to_datetime(from_date)) & \
-                           (raw_data['timestamp'] <= pd.to_datetime(to_date))
-                raw_data = raw_data[date_mask].copy()
-                
-                if len(raw_data) == 0:
-                    raise ValueError(f"No data found in Parquet file for date range {from_date} to {to_date}")
-                
-                # Process each row and extract station data
-                all_stations = []
-                for _, row in raw_data.iterrows():
-                    try:
-                        stations = row['data']['stations']
-                        for station in stations:
-                            station_record = {
-                                'station_id': str(station.get('station_id', '')),
-                                'num_bikes_available': station.get('num_bikes_available', 0),
-                                'num_docks_available': station.get('num_docks_available', 0),
-                                'timestamp_file': row['timestamp']
-                            }
-                            all_stations.append(station_record)
-                    except Exception as e:
-                        continue
-                
-                if not all_stations:
-                    raise ValueError("No valid station data found after processing")
-                
-                # Create DataFrame with only the needed columns
-                stations_data = pd.DataFrame(all_stations)
-                
-            except Exception as e:
-                raise ValueError(f"Error reading Parquet file: {str(e)}")
-        else:
-            raise ValueError(f"Parquet file not found at {single_parquet}")
+        try:
+            # Read parquet file from S3
+            response = s3_client.get_object(
+                Bucket='bicingdata',
+                Key='2023/data.parquet'
+            )
+            body_data = response['Body'].read()
+            parquet_file = io.BytesIO(body_data)
+            raw_data = pd.read_parquet(parquet_file)
+            
+            # Convert timestamp and filter by date range
+            raw_data['timestamp'] = pd.to_datetime(raw_data['timestamp'])
+            date_mask = (raw_data['timestamp'] >= pd.to_datetime(from_date)) & \
+                       (raw_data['timestamp'] <= pd.to_datetime(to_date))
+            raw_data = raw_data[date_mask].copy()
+            
+            if len(raw_data) == 0:
+                raise ValueError(f"No data found in Parquet file for date range {from_date} to {to_date}")
+
+            # Process each row and extract station data
+            all_stations = []
+            for _, row in raw_data.iterrows():
+                try:
+                    stations = row['data']['stations']
+                    for station in stations:
+                        station_record = {
+                            'station_id': str(station.get('station_id', '')),
+                            'num_bikes_available': station.get('num_bikes_available', 0),
+                            'num_docks_available': station.get('num_docks_available', 0),
+                            'timestamp_file': row['timestamp']
+                        }
+                        all_stations.append(station_record)
+                except Exception as e:
+                    continue
+            
+            if not all_stations:
+                raise ValueError("No valid station data found after processing")
+            
+            # Create DataFrame with only the needed columns
+            stations_data = pd.DataFrame(all_stations)
+            
+        except Exception as e:
+            raise ValueError(f"Failed to retrieve data from S3: {str(e)}")
     else:
         # Original JSON processing
         dates = list_folders(main_folder)
