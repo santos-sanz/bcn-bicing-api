@@ -119,63 +119,52 @@ def get_timeframe(file_format='json'):
     """
     try:
         timezone = pytz.timezone('Etc/GMT-2')
-        main_folder = 'data/2023'
-        parquet_file = 'data.parquet'
+        
+        # Get parquet file path from environment variable with fallback
+        parquet_path = os.getenv('PARQUET_FILE_PATH', 'data/2023/data.parquet')
         
         # Special handling for single parquet file
         if file_format == 'parquet':
-            # Try different possible paths for the parquet file
-            possible_paths = [
-                os.path.join(main_folder, parquet_file),
-                parquet_file,
-                os.path.join('data', parquet_file),
-                'data/2023/data.parquet'  # Absolute path from workspace root
-            ]
-            
-            print(f"Current working directory: {os.getcwd()}")
-            print(f"Checking for Parquet file in the following locations:")
-            for path in possible_paths:
-                print(f"- {path} (exists: {os.path.exists(path)})")
-            
-            parquet_path = None
-            for path in possible_paths:
-                if os.path.exists(path):
-                    parquet_path = path
-                    print(f"Found Parquet file at: {os.path.abspath(path)}")
-                    break
-            
-            if parquet_path is None:
-                raise FileNotFoundError(f"Parquet file not found in any of the expected locations: {possible_paths}")
-            
-            print(f"Reading Parquet file from: {parquet_path}")
-            df = pd.read_parquet(parquet_path)
-            
-            if 'timestamp' not in df.columns:
-                print(f"Available columns: {df.columns.tolist()}")
-                raise ValueError("Timestamp column not found in Parquet file")
-            
-            print("Successfully read Parquet file")
-            min_timestamp = df['timestamp'].min()
-            max_timestamp = df['timestamp'].max()
-            print(f"Raw timestamps - min: {min_timestamp}, max: {max_timestamp}")
-            
-            if pd.api.types.is_numeric_dtype(df['timestamp']):
-                min_timestamp = datetime.utcfromtimestamp(min_timestamp).replace(tzinfo=pytz.UTC)
-                max_timestamp = datetime.utcfromtimestamp(max_timestamp).replace(tzinfo=pytz.UTC)
+            if not os.path.exists(parquet_path):
+                # Fallback to JSON if Parquet file is not found
+                print(f"Parquet file not found at {parquet_path}, falling back to JSON")
+                file_format = 'json'
             else:
-                # Convert to UTC first, then to the target timezone
-                min_timestamp = pd.to_datetime(min_timestamp).tz_localize('UTC')
-                max_timestamp = pd.to_datetime(max_timestamp).tz_localize('UTC')
-            
-            # Convert from UTC to target timezone and subtract 4 hours
-            min_timestamp = min_timestamp.astimezone(timezone) - timedelta(hours=4)
-            max_timestamp = max_timestamp.astimezone(timezone) - timedelta(hours=4)
-            
-            result = (min_timestamp.strftime('%Y-%m-%d %H:%M:%S'), max_timestamp.strftime('%Y-%m-%d %H:%M:%S'))
-            print(f"Final timestamps: {result}")
-            return result
+                try:
+                    print(f"Reading Parquet file from: {parquet_path}")
+                    df = pd.read_parquet(parquet_path)
+                    
+                    if 'timestamp' not in df.columns:
+                        print(f"Available columns: {df.columns.tolist()}")
+                        raise ValueError("Timestamp column not found in Parquet file")
+                    
+                    print("Successfully read Parquet file")
+                    min_timestamp = df['timestamp'].min()
+                    max_timestamp = df['timestamp'].max()
+                    print(f"Raw timestamps - min: {min_timestamp}, max: {max_timestamp}")
+                    
+                    if pd.api.types.is_numeric_dtype(df['timestamp']):
+                        min_timestamp = datetime.utcfromtimestamp(min_timestamp).replace(tzinfo=pytz.UTC)
+                        max_timestamp = datetime.utcfromtimestamp(max_timestamp).replace(tzinfo=pytz.UTC)
+                    else:
+                        # Convert to UTC first, then to the target timezone
+                        min_timestamp = pd.to_datetime(min_timestamp).tz_localize('UTC')
+                        max_timestamp = pd.to_datetime(max_timestamp).tz_localize('UTC')
+                    
+                    # Convert from UTC to target timezone and subtract 4 hours
+                    min_timestamp = min_timestamp.astimezone(timezone) - timedelta(hours=4)
+                    max_timestamp = max_timestamp.astimezone(timezone) - timedelta(hours=4)
+                    
+                    result = (min_timestamp.strftime('%Y-%m-%d %H:%M:%S'), max_timestamp.strftime('%Y-%m-%d %H:%M:%S'))
+                    print(f"Final timestamps: {result}")
+                    return result
+                except Exception as e:
+                    print(f"Error reading Parquet file: {str(e)}")
+                    print("Falling back to JSON format")
+                    file_format = 'json'
         
-        # Original logic for timestamped files
+        # JSON processing (fallback)
+        main_folder = 'data/2023'
         if not os.path.exists(main_folder):
             raise FileNotFoundError(f"Main folder not found: {main_folder}")
             
@@ -183,10 +172,10 @@ def get_timeframe(file_format='json'):
         files = list_all_files(main_folder, dates)
         
         # Filter files by format
-        files = [f for f in files if f.endswith(f'.{file_format}')]
+        files = [f for f in files if f.endswith('.json')]
         
         if not files:
-            raise ValueError(f"No {file_format} files found in {main_folder}")
+            raise ValueError(f"No JSON files found in {main_folder}")
             
         timestamps = [int(x.split('/')[-1].split('.')[0]) for x in files]
         min_timestamp = min(timestamps)
