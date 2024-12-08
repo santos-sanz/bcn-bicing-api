@@ -122,37 +122,31 @@ def get_timeframe(file_format='json'):
         
         # Special handling for single parquet file
         if file_format == 'parquet':
-            # Try different possible paths for the parquet file
-            possible_paths = [
-                'data/2023/data.parquet',  # Default path
-                '/app/data/2023/data.parquet',  # Railway path
-                os.path.join(os.getcwd(), 'data/2023/data.parquet'),  # Absolute path
-                os.getenv('PARQUET_FILE_PATH', 'data/2023/data.parquet')  # Environment variable path
-            ]
+            # In Railway, we know the app is running in /app directory
+            if os.getcwd() == '/app':
+                parquet_path = '/app/data/2023/data.parquet'
+            else:
+                parquet_path = 'data/2023/data.parquet'
             
             print(f"Current working directory: {os.getcwd()}")
-            print(f"Checking for Parquet file in the following locations:")
-            for path in possible_paths:
-                print(f"- {path} (exists: {os.path.exists(path)})")
+            print(f"Using Parquet file path: {parquet_path}")
+            print(f"File exists: {os.path.exists(parquet_path)}")
             
-            parquet_path = None
-            for path in possible_paths:
-                if os.path.exists(path):
-                    parquet_path = path
-                    print(f"Found Parquet file at: {os.path.abspath(path)}")
-                    break
+            if not os.path.exists(parquet_path):
+                raise FileNotFoundError(f"Parquet file not found at: {parquet_path}")
             
-            if parquet_path is None:
-                raise FileNotFoundError(f"Parquet file not found in any of the expected locations: {possible_paths}")
-            
-            print(f"Reading Parquet file from: {parquet_path}")
-            df = pd.read_parquet(parquet_path)
+            try:
+                print(f"Reading Parquet file from: {parquet_path}")
+                df = pd.read_parquet(parquet_path)
+                print("Successfully read Parquet file")
+            except Exception as e:
+                print(f"Error reading Parquet file: {str(e)}")
+                raise
             
             if 'timestamp' not in df.columns:
                 print(f"Available columns: {df.columns.tolist()}")
                 raise ValueError("Timestamp column not found in Parquet file")
             
-            print("Successfully read Parquet file")
             min_timestamp = df['timestamp'].min()
             max_timestamp = df['timestamp'].max()
             print(f"Raw timestamps - min: {min_timestamp}, max: {max_timestamp}")
