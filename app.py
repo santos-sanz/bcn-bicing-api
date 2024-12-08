@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Query, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from enum import Enum
-from typing import Optional, List
+from typing import Optional, List, Literal
 from pydantic import BaseModel, Field, ConfigDict
 import os
 from dotenv import load_dotenv
@@ -58,6 +58,12 @@ class FileFormat(str, Enum):
     """Supported file formats for data retrieval"""
     json = "json"
     parquet = "parquet"
+
+class FlowOutput(str, Enum):
+    """Valid flow output types"""
+    BOTH = "both"
+    IN = "in"
+    OUT = "out"
 
 app.add_middleware(
     CORSMiddleware,
@@ -244,21 +250,24 @@ class FlowRequest(BaseModel):
     format: FileFormat = Field(default=FileFormat.parquet, description="Data format (json or parquet)")
 
 @app.get("/flow",
-    summary="Get Station Flow Analysis",
-    description="""
-    Analyze bike flow (incoming/outgoing) for a specific station over a time period.
-    Supports different aggregation timeframes and can focus on incoming, outgoing, or both flows.
-    """,
-    response_description="Flow analysis data for the requested station"
+    summary="Get Flow Statistics",
+    description="Retrieve flow statistics for stations over a time period",
+    response_description="Flow statistics data"
 )
 async def get_flow_data(
     from_date: str = Query(..., description="Start date (YYYY-MM-DD HH:MM:SS)"),
     to_date: str = Query(..., description="End date (YYYY-MM-DD HH:MM:SS)"),
     model: str = Query(..., description="Station model type"),
     station_code: str = Query(..., description="Station identifier"),
-    output: str = Query(default='both', description="Flow type: 'both', 'in', or 'out'"),
-    aggregation_timeframe: str = Query(default=DEFAULT_AGGREGATION_TIMEFRAME, description="Time window for aggregation"),
-    format: FileFormat = Query(default=FileFormat(DEFAULT_FORMAT))
+    output: FlowOutput = Query(
+        default=FlowOutput.BOTH,
+        description="Type of flow to analyze: 'both' for in/out, 'in' for incoming, 'out' for outgoing"
+    ),
+    aggregation_timeframe: str = Query(
+        default=DEFAULT_AGGREGATION_TIMEFRAME,
+        description="Time window for data aggregation (e.g., '1h', '30min')"
+    ),
+    format: FileFormat = Query(FileFormat(DEFAULT_FORMAT))
 ):
     """
     Get flow analysis data for a specific station.
