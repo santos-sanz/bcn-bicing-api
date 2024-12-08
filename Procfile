@@ -1,1 +1,1 @@
- 
+web: uvicorn app:app --host 0.0.0.0 --port $PORT --timeout-keep-alive 75 --workers 1 --limit-max-requests 1000 
