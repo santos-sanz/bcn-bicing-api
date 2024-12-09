@@ -165,7 +165,7 @@ def flow(
 
                 # Format output
                 flow_agg.reset_index(inplace=True)
-                flow_agg['time'] = flow_agg['timestamp_file'].dt.strftime('%H:%M')
+                flow_agg['time'] = flow_agg['timestamp_file'].dt.strftime('%Y-%m-%d %H:%M')
 
                 # Return requested output format
                 if output == 'inflow':

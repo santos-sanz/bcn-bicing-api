@@ -1,5 +1,4 @@
 from utils import *
-import os
 import io
 import logging
 import pandas as pd
@@ -7,7 +6,8 @@ from datetime import datetime, timedelta
 import psutil
 import gc
 import pytz
-import json  # Added to parse JSON strings
+import json
+import os
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -72,9 +72,16 @@ def get_station_stats(
         stations = get_stations(model, model_code)
         
         try:
-            # Read only necessary columns from Parquet
-            parquet_file = 'data/2023/data.parquet'
-            if os.path.exists(parquet_file):
+            bucket_name = os.getenv('S3_BUCKET_NAME')
+            if not bucket_name:
+                raise ValueError("S3_BUCKET_NAME environment variable is not set")
+            parquet_key = '2023/data.parquet'
+
+            try:
+                logger.info(f"Attempting to read parquet file from S3: {bucket_name}/{parquet_key}")
+                # Read Parquet file from S3
+                response = s3_client.get_object(Bucket=bucket_name, Key=parquet_key)
+                parquet_file = io.BytesIO(response['Body'].read())
                 df = pd.read_parquet(parquet_file, columns=['timestamp', 'data'])
                 
                 # Ensure timestamps are timezone-naive for comparison
@@ -94,7 +101,7 @@ def get_station_stats(
                 if stations_data.empty:
                     raise ValueError("No valid station data found")
                 
-                # Filter by stations
+                # Continue with the rest of the processing
                 stations_data = stations_data[stations_data['station_id'].isin(stations)]
                 
                 # Get station master data efficiently
@@ -127,8 +134,12 @@ def get_station_stats(
                 result = pd.merge(stats, events, on='station_id', how='inner')
                 return result.to_dict(orient='records')
                 
-            else:
-                raise ValueError("Parquet file not found")
+            except s3_client.exceptions.NoSuchKey:
+                logger.error(f"Parquet file not found in S3: {bucket_name}/{parquet_key}")
+                raise ValueError(f"Parquet file not found in S3: {bucket_name}/{parquet_key}")
+            except Exception as e:
+                logger.error(f"Error accessing S3: {str(e)}")
+                raise
                 
         except Exception as e:
             logger.error(f"Error processing data: {str(e)}")
@@ -154,54 +165,57 @@ def get_station_stats_by_timestamp(
     :param file_format: str: 'parquet' format for data storage
     :return: pd.DataFrame: Station statistics
     """
-    main_folder = 'analytics/snapshots'
-    single_parquet = 'data/2023/data.parquet'
+    bucket_name = os.getenv('S3_BUCKET_NAME')
+    if not bucket_name:
+        raise ValueError("S3_BUCKET_NAME environment variable is not set")
+    parquet_key = '2023/data.parquet'
     
     # Handle Parquet file reading
     if file_format == 'parquet':
-        if os.path.exists(single_parquet):
+        try:
+            logger.info(f"Attempting to read parquet file from S3: {bucket_name}/{parquet_key}")
+            # Read Parquet file from S3
+            response = s3_client.get_object(Bucket=bucket_name, Key=parquet_key)
+            parquet_file = io.BytesIO(response['Body'].read())
+            raw_data = pd.read_parquet(parquet_file)
+            
+            # Convert timestamp to datetime for comparison
+            raw_data['timestamp'] = pd.to_datetime(raw_data['timestamp'])
+            target_time = pd.to_datetime(timestamp)
+            
+            # Find closest timestamp
+            raw_data['time_diff'] = abs(raw_data['timestamp'] - target_time)
+            closest_row = raw_data.loc[raw_data['time_diff'].idxmin()]
+            
+            # Process station data from closest timestamp
+            all_stations = []
             try:
-                raw_data = pd.read_parquet(single_parquet)
-                
-                # Convert timestamp to datetime for comparison
-                raw_data['timestamp'] = pd.to_datetime(raw_data['timestamp'])
-                target_time = pd.to_datetime(timestamp)
-                
-                # Find closest timestamp
-                raw_data['time_diff'] = abs(raw_data['timestamp'] - target_time)
-                closest_row = raw_data.loc[raw_data['time_diff'].idxmin()]
-                
-                # Process station data from closest timestamp
-                all_stations = []
-                try:
-                    stations = closest_row['data']['stations']
-                    for station in stations:
-                        station_record = {
-                            'station_id': str(station.get('station_id', '')),
-                            'num_bikes_available': station.get('num_bikes_available', 0),
-                            'num_docks_available': station.get('num_docks_available', 0),
-                            'timestamp_file': closest_row['timestamp']
-                        }
-                        all_stations.append(station_record)
-                except Exception as e:
-                    raise ValueError(f"Error processing station data: {str(e)}")
-                
-                if not all_stations:
-                    raise ValueError("No valid station data found")
-                
-                stations_data = pd.DataFrame(all_stations)
-                
+                stations = closest_row['data']['stations']
+                for station in stations:
+                    station_record = {
+                        'station_id': str(station.get('station_id', '')),
+                        'num_bikes_available': station.get('num_bikes_available', 0),
+                        'num_docks_available': station.get('num_docks_available', 0),
+                        'timestamp_file': closest_row['timestamp']
+                    }
+                    all_stations.append(station_record)
             except Exception as e:
-                raise ValueError(f"Error reading Parquet file: {str(e)}")
-        else:
-            raise ValueError(f"Parquet file not found at {single_parquet}")
+                logger.error(f"Error processing station data: {str(e)}")
+                raise ValueError(f"Error processing station data: {str(e)}")
+            
+            if not all_stations:
+                raise ValueError("No valid station data found")
+            
+            stations_data = pd.DataFrame(all_stations)
+            
+        except s3_client.exceptions.NoSuchKey:
+            logger.error(f"Parquet file not found in S3: {bucket_name}/{parquet_key}")
+            raise ValueError(f"Parquet file not found in S3: {bucket_name}/{parquet_key}")
+        except Exception as e:
+            logger.error(f"Error reading Parquet file from S3: {str(e)}")
+            raise ValueError(f"Error reading Parquet file from S3: {str(e)}")
     else:
-        # Original JSON processing
-        dates = list_folders(main_folder)
-        files = list_all_files(main_folder, dates)
-        files = [f for f in files if f.endswith('.json')]
-        closest_file = filter_input_by_timestamp(files, timestamp)[0]
-        stations_data = json_to_dataframe([closest_file])
+        raise ValueError("Only parquet format is supported")
     
     stations = get_stations(model, model_code)
     stations_data = stations_data[stations_data['station_id'].isin(stations)]
