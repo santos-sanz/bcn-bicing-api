@@ -288,37 +288,6 @@ async def get_flow_data(
         print(f"Error in flow endpoint: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
     
-@app.get("/flow_now",
-    summary="Get Recent Flow Analysis",
-    description="Get flow analysis for the last 24 hours for a specific station",
-    response_description="Recent flow analysis data for the requested station"
-)
-def get_flow_data_now(
-    model: str = Query(..., description="Station model type"),
-    station_code: str = Query(..., description="Station identifier")
-):
-    """
-    Get flow analysis for the last 24 hours.
-    
-    Args:
-        model: Station model type
-        station_code: Station identifier
-    
-    Returns:
-        dict: Recent flow analysis data for the specified station
-    """
-    try:
-        response = flow_parquet(
-            from_date=(datetime.datetime.strptime(get_last_timestamp(), '%Y-%m-%d %H:%M:%S') - datetime.timedelta(days=1)).strftime('%Y-%m-%d %H:%M:%S'),
-            to_date=get_last_timestamp(),
-            model=model,
-            model_code=station_code,
-            output='both',
-            aggregation_timeframe='1h'
-        )
-        return response
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
 
 
 
